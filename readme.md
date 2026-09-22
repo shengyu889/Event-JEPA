@@ -125,10 +125,13 @@ python src/gra.py
 ### Saving Tokens for Stage 2
 Once you have an aligned event encoder from Stage 1, you need to extract and save the patch tokens to disk. This heavily accelerates Stage 2 training.
 
-Some scripts support a `--process-tokens` flag or have a dedicated tokenization function uncommented inside the script. You will need to load your Stage 1 checkpoint inside the preprocessing script to extract the features:
+Some scripts have a dedicated tokenization function enabled inside the script. You will need to load your Stage 1 checkpoint inside the preprocessing script to extract the features:
 ```bash
-# Example for DSEC: Modify src/pre_dse.py to load your stage 1 checkpoint, then run:
-python src/pre_dse.py --process-tokens --token-workers 8
+# Example for DSEC: modify src/pre_dse.py to load your Stage-1 checkpoint, then run:
+PYTHONPATH=src python src/pre_dse.py \
+  --root /path/to/DSEC \
+  --device cuda:0 \
+  --workers 8
 ```
 *This will create `eventToken` and `imageToken` directories containing `.pt` files.*
 
