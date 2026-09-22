@@ -84,3 +84,46 @@ def train_micro_step(
         "grad_norm": grad_norm,
         "optimizer_stepped": optimizer_stepped,
     }
+
+
+def cosine_learning_rate(
+    step: int,
+    warmup_steps: int,
+    total_steps: int,
+    peak: float,
+    minimum: float,
+) -> float:
+    if step < warmup_steps:
+        return peak * step / max(warmup_steps, 1)
+    progress = min(
+        (step - warmup_steps) / max(total_steps - warmup_steps, 1),
+        1.0,
+    )
+    return minimum + 0.5 * (peak - minimum) * (
+        1.0 + math.cos(math.pi * progress)
+    )
+
+
+@torch.no_grad()
+def validate(model, loader, device, precision, max_batches=None):
+    model.eval()
+    totals = {
+        "loss": 0.0,
+        "representation_std": 0.0,
+        "mean_cosine": 0.0,
+    }
+    count = 0
+    for batch in loader:
+        with _autocast(device, precision):
+            output = model(
+                batch["context"].to(device),
+                batch["target"].to(device),
+                batch["delta_t"].to(device),
+            )
+        for key in totals:
+            totals[key] += float(output[key])
+        count += 1
+        if max_batches is not None and count >= max_batches:
+            break
+    model.train()
+    return {key: value / max(count, 1) for key, value in totals.items()}
