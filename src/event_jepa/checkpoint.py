@@ -66,3 +66,16 @@ def export_gep_transformer(path, model, metadata) -> None:
         "metadata": dict(metadata),
     }
     torch.save(payload, path)
+
+
+def load_gep_transformer_export(path):
+    path = Path(path)
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if (
+        payload.get("format_version") != 1
+        or payload.get("source") != "event_jepa"
+    ):
+        raise ValueError(f"not a supported Event-JEPA export: {path}")
+    if not isinstance(payload.get("transformer"), dict):
+        raise ValueError(f"Event-JEPA export has no transformer state: {path}")
+    return payload["transformer"], payload.get("metadata", {})

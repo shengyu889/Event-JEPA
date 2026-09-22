@@ -19,6 +19,22 @@
 
 This repository provides the official implementation for the paper "Generative Event Pretraining with Foundation Model Alignment". It features a two-stage pre-training framework that aligns event data with visual representations and further trains generative models for downstream applications.
 
+## Event-JEPA extension
+
+This branch adds token-level temporal predictive pretraining over frozen GEP Stage-1 event features. It preserves GEP's transformer parameter layout for strict downstream loading. See the [design](docs/superpowers/specs/2026-09-20-event-jepa-gep-integration-design.md), [implementation plan](docs/superpowers/plans/2026-09-22-event-jepa-gep-integration.md), and [runbook](docs/event_jepa_runbook.md).
+
+RTX 5070 Ti smoke:
+
+```bash
+PYTHONPATH=src python src/train_jepa.py --config configs/event_jepa_smoke.yaml
+```
+
+Four-GPU A100 training:
+
+```bash
+PYTHONPATH=src torchrun --standalone --nproc_per_node=4 src/train_jepa.py --config configs/event_jepa_a100.yaml
+```
+
 <!-- TODO: Insert your framework overview image here -->
 ![Framework Overview](overview.png "Framework Overview")
 

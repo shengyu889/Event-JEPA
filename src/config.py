@@ -1363,6 +1363,27 @@ class CLSConfig(Config):
         
         self.n_head                 = 6 if self.vit == "small" else 12
         self.n_layer                = 12
+        event_jepa_export = os.environ.get("EVENT_JEPA_TRANSFORMER_CKPT")
+        if event_jepa_export:
+            from event_jepa.checkpoint import load_gep_transformer_export
+
+            self.transformer_weight, export_metadata = (
+                load_gep_transformer_export(event_jepa_export)
+            )
+            self.window_size = int(
+                export_metadata.get("max_positions", self.window_size)
+            )
+            exported_dim = int(
+                export_metadata.get("embed_dim", self.n_embed)
+            )
+            if exported_dim != self.n_embed:
+                raise ValueError(
+                    f"Event-JEPA embed_dim {exported_dim} does not match "
+                    f"classifier embed_dim {self.n_embed}"
+                )
+            self.n_layer = int(
+                export_metadata.get("encoder_layers", self.n_layer)
+            )
         self.n_tokens_per_image     = (self.H // self.P) * (self.W // self.P)
 
         self.modality               = "event"
