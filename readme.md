@@ -59,9 +59,9 @@ conda activate gep
 ```
 
 **2. Install PyTorch and CUDA Dependencies**
-Install PyTorch 2.6.0 with CUDA 11.8 support:
+Install the pinned CUDA 12.8 build. PyTorch 2.7 introduced Blackwell support; this is required for RTX 50-series GPUs while remaining compatible with A100:
 ```bash
-pip install torch==2.6.0+cu118 torchvision==0.21.0+cu118 torchaudio==2.6.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 **3. Install Remaining Requirements**

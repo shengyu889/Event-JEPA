@@ -4,11 +4,16 @@ Event-JEPA V1 在冻结的 GEP Stage-1 事件 token 上做时间预测式预训�
 
 ## 1. 环境和自检
 
+RTX 5070 Ti 的 compute capability 是 12.0。不要沿用上游的 PyTorch 2.6/CUDA 11.8 轮子；本分支固定 PyTorch 2.7.1/CUDA 12.8，因为 PyTorch 从 2.7 起提供 Blackwell 支持。
+
 ```bash
 conda env create -f environment.yml
 conda activate gep
+python -c "import torch; print(torch.__version__, torch.version.cuda); print(torch.cuda.get_device_name()); print(torch.cuda.get_arch_list())"
 pytest -q
 ```
+
+验证输出中必须出现你的 RTX 5070 Ti，并且架构列表包含 `sm_120`。若实验室 A100 驱动不支持 CUDA 12.8，请只在 A100 环境按 PyTorch 官方版本矩阵改用 cu126；不要在 5070 Ti 上退回 cu126。
 
 数据目录必须满足：
 
