@@ -1,0 +1,16 @@
+{
+  "protocol": "formal_v1_single_seed",
+  "split_creation_seed": 20260928,
+  "ssl_split_seed": 20260929,
+  "all_stage2_sequences": 41,
+  "flow_sequences": 18,
+  "stage2_train_sequences": 33,
+  "stage2_val_sequences": 4,
+  "flow_train_sequences": 14,
+  "FINAL_flow_sequences": [
+    "zurich_city_01_a",
+    "zurich_city_02_c",
+    "zurich_city_05_b",
+    "zurich_city_11_c"
+  ]
+}

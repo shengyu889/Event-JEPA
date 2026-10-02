@@ -18,6 +18,7 @@ except ImportError:
 from event_jepa.checkpoint import load_checkpoint, save_checkpoint
 from event_jepa.config import EventJEPAConfig, load_config
 from event_jepa.dataset import EventJEPADataset
+from event_jepa.packed_stage2 import PackedStage2Dataset
 from event_jepa.engine import (
     cosine_learning_rate,
     ema_momentum,
@@ -25,6 +26,7 @@ from event_jepa.engine import (
     validate,
 )
 from event_jepa.model import EventJEPA
+from event_jepa.model_v2 import OrderAwareResidualEventJEPA
 
 
 def distributed_context() -> tuple[int, int, int, torch.device]:
@@ -43,20 +45,86 @@ def distributed_context() -> tuple[int, int, int, torch.device]:
 
 
 def build_model(config: EventJEPAConfig) -> EventJEPA:
-    return EventJEPA(
-        config.embed_dim,
-        config.num_heads,
-        config.encoder_layers,
-        config.predictor_layers,
-        config.n_tokens,
-        config.max_positions,
-        config.max_context_frames,
+    common = dict(
+        embed_dim=config.embed_dim,
+        num_heads=config.num_heads,
+        encoder_layers=config.encoder_layers,
+        predictor_layers=config.predictor_layers,
+        n_tokens=config.n_tokens,
+        max_positions=config.max_positions,
+        max_context_frames=config.max_context_frames,
         max_horizons=len(config.horizons),
     )
 
+    if (
+        config.residual_weight > 0
+        or config.order_weight > 0
+    ):
+        return OrderAwareResidualEventJEPA(
+            **common,
+            residual_weight=config.residual_weight,
+            order_weight=config.order_weight,
+            order_margin=config.order_margin,
+        )
 
-def _dataset(config: EventJEPAConfig, split: str) -> EventJEPADataset:
-    return EventJEPADataset(
+    return EventJEPA(**common)
+
+
+def _dataset(config: EventJEPAConfig, split: str):
+    packed_root = config.data_root / "packed"
+
+    packed_available = (
+        (packed_root / "train_tokens.npy").is_file()
+        and (packed_root / "train_timestamps.npy").is_file()
+        and (packed_root / "val_tokens.npy").is_file()
+        and (packed_root / "val_timestamps.npy").is_file()
+    )
+
+    if packed_available:
+        # Current packed Stage-2 cache has one fixed protocol:
+        # Tc=4, horizons=[1,2,4], N=256, D=384.
+        if config.context_frames != 4:
+            raise ValueError(
+                "packed Stage-2 requires context_frames=4"
+            )
+
+        if tuple(config.horizons) != (1, 2, 4):
+            raise ValueError(
+                "packed Stage-2 requires horizons=(1,2,4)"
+            )
+
+        if config.n_tokens != 256:
+            raise ValueError(
+                "packed Stage-2 requires n_tokens=256"
+            )
+
+        if config.embed_dim != 384:
+            raise ValueError(
+                "packed Stage-2 requires embed_dim=384"
+            )
+
+        packed_split = (
+            "train"
+            if split == "train"
+            else "val"
+        )
+
+        dataset = PackedStage2Dataset(
+            config.data_root,
+            packed_split,
+            n_tokens=config.n_tokens,
+            embed_dim=config.embed_dim,
+        )
+
+        print(
+            f"[DATA] packed backend "
+            f"split={packed_split} "
+            f"samples={len(dataset)}"
+        )
+
+        return dataset
+
+    dataset = EventJEPADataset(
         config.data_root,
         split,
         config.context_frames,
@@ -65,6 +133,14 @@ def _dataset(config: EventJEPAConfig, split: str) -> EventJEPADataset:
         config.embed_dim,
         config.timestamp_scale,
     )
+
+    print(
+        f"[DATA] pt backend "
+        f"split={split} "
+        f"samples={len(dataset)}"
+    )
+
+    return dataset
 
 
 def build_loaders(config: EventJEPAConfig, rank: int, world_size: int):
@@ -236,6 +312,34 @@ def run_training(
                             float(batch["delta_t"].mean()),
                             step,
                         )
+
+                    # Human-readable stdout logging.
+                    parts = [
+                        f"step={step:06d}",
+                        f"loss={metrics['loss']:.6f}",
+                    ]
+
+                    for key in (
+                        "future_loss",
+                        "residual_loss",
+                        "order_loss",
+                        "order_gap",
+                        "mean_cosine",
+                    ):
+                        if key in metrics:
+                            parts.append(
+                                f"{key}={metrics[key]:.6f}"
+                            )
+
+                    parts.extend([
+                        f"grad={metrics['grad_norm']:.4f}",
+                        f"lr={lr:.8e}",
+                    ])
+
+                    print(
+                        " ".join(parts),
+                        flush=True,
+                    )
                 if (
                     rank == 0
                     and step > 0

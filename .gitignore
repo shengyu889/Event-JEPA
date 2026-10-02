@@ -7,3 +7,24 @@ events.out.tfevents.*
 IMG_5223.JPG
 IMG_5160.JPG
 Event-Camera-Data-Pre-training/txt/train_file.txt:w
+# Local datasets, checkpoints and training outputs
+datasets/
+downloads/
+checkpoints/
+logs/
+runs/
+wandb/
+
+# Python caches
+.pytest_cache/
+**/__pycache__/
+*.py[cod]
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+
+# Local backup/generated files
+*.before_*
+src/vis_*.png

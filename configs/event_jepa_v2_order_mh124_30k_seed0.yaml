@@ -1,0 +1,42 @@
+data_root: /home/tom/event-jepa/datasets/DSEC_JEPA_PILOT
+output_dir: runs/event_jepa_v2_order_mh124_seed0_30k
+
+seed: 0
+timestamp_scale: 0.000001
+
+context_frames: 4
+horizons: [1, 2, 4]
+
+n_tokens: 256
+embed_dim: 384
+num_heads: 6
+encoder_layers: 12
+predictor_layers: 2
+
+max_positions: 4096
+max_context_frames: 8
+
+batch_size: 8
+grad_accum_steps: 2
+num_workers: 4
+
+learning_rate: 0.0001
+weight_decay: 0.00001
+min_learning_rate: 0.0
+
+warmup_steps: 1000
+total_steps: 30000
+
+ema_start: 0.996
+ema_end: 0.9999
+
+precision: bf16
+grad_clip_norm: 1.0
+
+residual_weight: 0.0
+order_weight: 10.0
+order_margin: 0.005
+
+log_every: 250
+validate_every: 2500
+save_every: 5000

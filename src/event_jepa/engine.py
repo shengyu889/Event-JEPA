@@ -77,13 +77,27 @@ def train_micro_step(
             core_model = model.module if hasattr(model, "module") else model
             core_model.update_target(ema_value)
 
-    return {
+    metrics = {
         "loss": float(output["loss"].detach()),
         "representation_std": float(output["representation_std"]),
         "mean_cosine": float(output["mean_cosine"]),
         "grad_norm": grad_norm,
         "optimizer_stepped": optimizer_stepped,
     }
+
+    # Optional V2 diagnostics. V1 remains fully backward-compatible.
+    for key in (
+        "future_loss",
+        "residual_loss",
+        "order_loss",
+        "order_gap",
+    ):
+        if key in output:
+            metrics[key] = float(
+                output[key].detach()
+            )
+
+    return metrics
 
 
 def cosine_learning_rate(
@@ -105,25 +119,67 @@ def cosine_learning_rate(
 
 
 @torch.no_grad()
-def validate(model, loader, device, precision, max_batches=None):
+def validate(
+    model,
+    loader,
+    device,
+    precision,
+    max_batches=None,
+):
     model.eval()
-    totals = {
-        "loss": 0.0,
-        "representation_std": 0.0,
-        "mean_cosine": 0.0,
-    }
+
+    tracked = (
+        "loss",
+        "representation_std",
+        "mean_cosine",
+        "future_loss",
+        "residual_loss",
+        "order_loss",
+        "order_gap",
+    )
+
+    totals = {}
     count = 0
+
     for batch in loader:
-        with _autocast(device, precision):
+        with _autocast(
+            device,
+            precision,
+        ):
             output = model(
-                batch["context"].to(device),
-                batch["target"].to(device),
-                batch["delta_t"].to(device),
+                batch["context"].to(
+                    device
+                ),
+                batch["target"].to(
+                    device
+                ),
+                batch["delta_t"].to(
+                    device
+                ),
             )
-        for key in totals:
-            totals[key] += float(output[key])
+
+        for key in tracked:
+            if key in output:
+                totals[key] = (
+                    totals.get(key, 0.0)
+                    + float(output[key])
+                )
+
         count += 1
-        if max_batches is not None and count >= max_batches:
+
+        if (
+            max_batches is not None
+            and count >= max_batches
+        ):
             break
+
     model.train()
-    return {key: value / max(count, 1) for key, value in totals.items()}
+
+    return {
+        key: value / max(count, 1)
+        for key, value
+        in totals.items()
+    }
+
+
+

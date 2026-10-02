@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import torch
+from torch import nn
+
+from event_jepa.encoders import EventTokenEncoder
+
+
+def module_sha256(module: nn.Module) -> str:
+    h = hashlib.sha256()
+
+    for name, tensor in sorted(
+        module.state_dict().items()
+    ):
+        x = (
+            tensor.detach()
+            .cpu()
+            .contiguous()
+        )
+
+        h.update(name.encode())
+        h.update(
+            str(tuple(x.shape)).encode()
+        )
+        h.update(str(x.dtype).encode())
+        h.update(
+            x.view(torch.uint8)
+            .numpy()
+            .tobytes()
+        )
+
+    return h.hexdigest()
+
+
+class FrozenFlowBackbone(nn.Module):
+    """
+    Frozen representation backbone for controlled DSEC-flow probing.
+
+    mode="stage1":
+        context [B,4,N,D]
+        -> use raw last Stage-1 token frame
+        -> [B,N,D]
+
+    mode="jepa":
+        load full Event-JEPA online encoder
+        -> use exactly the context length that checkpoint was trained with
+        -> select last spatial frame after temporal encoding
+        -> [B,N,D]
+    """
+
+    def __init__(
+        self,
+        mode: str,
+        checkpoint: str | Path | None = None,
+    ):
+        super().__init__()
+
+        if mode not in {
+            "stage1",
+            "jepa",
+        }:
+            raise ValueError(
+                f"unsupported mode: {mode}"
+            )
+
+        self.mode = mode
+        self.encoder = None
+        self.config = None
+
+        self.n_tokens = 256
+        self.embed_dim = 384
+        self.context_frames = 1
+
+        if mode == "stage1":
+            # No trainable representation module:
+            # input files are already frozen Stage-1 tokens.
+            return
+
+        if checkpoint is None:
+            raise ValueError(
+                "JEPA mode requires checkpoint"
+            )
+
+        checkpoint = Path(checkpoint)
+
+        state = torch.load(
+            checkpoint,
+            map_location="cpu",
+            weights_only=False,
+        )
+
+        if "online_encoder" not in state:
+            raise KeyError(
+                f"{checkpoint}: missing online_encoder"
+            )
+
+        if "config" not in state:
+            raise KeyError(
+                f"{checkpoint}: missing config"
+            )
+
+        cfg = state["config"]
+
+        required = [
+            "embed_dim",
+            "num_heads",
+            "encoder_layers",
+            "n_tokens",
+            "max_positions",
+            "max_context_frames",
+            "context_frames",
+            "horizons",
+        ]
+
+        missing = [
+            k for k in required
+            if k not in cfg
+        ]
+
+        if missing:
+            raise KeyError(
+                f"checkpoint config missing: {missing}"
+            )
+
+        self.config = dict(cfg)
+
+        self.embed_dim = int(
+            cfg["embed_dim"]
+        )
+
+        self.n_tokens = int(
+            cfg["n_tokens"]
+        )
+
+        self.context_frames = int(
+            cfg["context_frames"]
+        )
+
+        self.encoder = EventTokenEncoder(
+            embed_dim=self.embed_dim,
+            num_heads=int(
+                cfg["num_heads"]
+            ),
+            num_layers=int(
+                cfg["encoder_layers"]
+            ),
+            n_tokens=self.n_tokens,
+            max_positions=int(
+                cfg["max_positions"]
+            ),
+            max_context_frames=int(
+                cfg["max_context_frames"]
+            ),
+        )
+
+        self.encoder.load_state_dict(
+            state["online_encoder"],
+            strict=True,
+        )
+
+        self.encoder.requires_grad_(False)
+        self.encoder.eval()
+
+    def train(
+        self,
+        mode: bool = True,
+    ):
+        # The representation must ALWAYS stay in eval mode.
+        super().train(False)
+
+        if self.encoder is not None:
+            self.encoder.eval()
+
+        return self
+
+    @torch.no_grad()
+    def forward(
+        self,
+        context: torch.Tensor,
+    ) -> torch.Tensor:
+        if context.ndim != 4:
+            raise ValueError(
+                "context must be [B,T,N,D]"
+            )
+
+        B, T, N, D = context.shape
+
+        if (
+            N != self.n_tokens
+            or D != self.embed_dim
+        ):
+            raise ValueError(
+                f"expected N,D="
+                f"{self.n_tokens},{self.embed_dim}, "
+                f"got {N},{D}"
+            )
+
+        if self.mode == "stage1":
+            # Exact same sample as temporal methods,
+            # but no Stage-2 representation learning.
+            return context[:, -1].float()
+
+        required_t = self.context_frames
+
+        if T < required_t:
+            raise ValueError(
+                f"checkpoint requires "
+                f"{required_t} context frames, "
+                f"batch only has {T}"
+            )
+
+        # Important:
+        # Tc1 checkpoint receives only t0.
+        # Tc4 checkpoint receives t-3:t0.
+        x = context[
+            :,
+            -required_t:,
+            :,
+            :,
+        ]
+
+        z = self.encoder(x)
+
+        expected = (
+            B,
+            required_t * self.n_tokens,
+            self.embed_dim,
+        )
+
+        if tuple(z.shape) != expected:
+            raise RuntimeError(
+                f"unexpected encoded shape "
+                f"{tuple(z.shape)}, "
+                f"expected {expected}"
+            )
+
+        # Last 256 tokens correspond to the latest
+        # context frame t0, but after non-causal
+        # temporal/contextual encoding.
+        z_last = z[
+            :,
+            -self.n_tokens:,
+            :,
+        ]
+
+        return z_last.float()

@@ -5,9 +5,9 @@ if "dinov3" not in sys.path:
     sys.path.append("dinov3")
 # --------------------------------deterministic setting-------------------------------- #
 import numpy as np
-seed = 0
-np.random.seed(seed)
 import os
+seed = int(os.environ.get("SEG_SEED", "0"))
+np.random.seed(seed)
 os.environ['PYTHONHASHSEED'] = str(seed)
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
 import torch
@@ -21,7 +21,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.enabled = True
 g = torch.Generator()
 g.manual_seed(seed)
-torch.use_deterministic_algorithms(True)
+torch.use_deterministic_algorithms(True, warn_only=True)
 # --------------------------------------------------------------------------------------- #
 import itertools
 import math
@@ -44,7 +44,7 @@ from torchinfo import summary
 from torchvision.models import swin_t
 from tqdm import tqdm
 
-from dinov2.models.vision_transformer import vit_small, vit_base, vit_small_plus
+from dinov2.models.vision_transformer import vit_small, vit_base
 from model import Block, Transformer
 from utils import IOU, PixelAccuracy, get_lr, get_param_groups, multiclass_ce_loss, multiclass_dice_loss
 try:
@@ -60,18 +60,8 @@ except ImportError:  # fall back to local src/mem.py when package name clashes
     MEMEncoderConfig = _mem_module.MEMEncoderConfig
     MemEncoder = _mem_module.MemEncoder
 
-try:
-    from ecddp import ECDDPEncoderConfig, ECDDPEncoder
-except ImportError:  # fall back to local src/ecddp.py
-    _ec_spec = importlib.util.spec_from_file_location(
-        "seg_ecddp_module", Path(__file__).resolve().with_name("ecddp.py")
-    )
-    _ec_module = importlib.util.module_from_spec(_ec_spec)
-    assert _ec_spec and _ec_spec.loader
-    sys.modules[_ec_spec.name] = _ec_module
-    _ec_spec.loader.exec_module(_ec_module)
-    ECDDPEncoderConfig = _ec_module.ECDDPEncoderConfig
-    ECDDPEncoder = _ec_module.ECDDPEncoder
+# ECDDP is an optional baseline dependency.
+# Import it lazily only when encoder_mode == "ecddp".
 
 from torch.utils.tensorboard import SummaryWriter
 class CenterPadding(torch.nn.Module):
@@ -367,6 +357,10 @@ class SEG(Transformer):
             )
             self.event_encoder = MemEncoder(mem_cfg)
         elif self.encoder_mode == "ecddp":
+            # Lazy import: normal GEP/Event-JEPA segmentation does not
+            # require the external ECDDP/Swin repository.
+            from ecddp import ECDDPEncoderConfig, ECDDPEncoder
+
             ec_cfg = ECDDPEncoderConfig(
                 ckpt_path=self.config.event_encoder_weight,
                 image_size=getattr(self.config, "ecddp_image_size", (self.config.H, self.config.W)),
@@ -421,7 +415,7 @@ class SEG(Transformer):
                             img_size=518,
                             block_chunks=0,
                             init_values=1e-6,
-                            num_register_tokens=4,
+                            num_register_tokens=0,
                         )
                     elif vit_size == "small+":
                         self.event_encoder = vit_small_plus(
@@ -451,14 +445,26 @@ class SEG(Transformer):
             print("*" * 50 + " dim_proj loaded")
 
         if hasattr(config, "transformer_weight"):
-            self.transformer = nn.ModuleDict(dict(
-                modality_embed = nn.Embedding(5, config.n_embed),
-                pos_embed = nn.Embedding(config.window_size, config.n_embed),
-                blocks = nn.ModuleList([Block(config) for _ in range(self.config.n_layer)]),
-                norm = nn.LayerNorm(config.n_embed),
-            ))
+            transformer_modules = dict(
+                modality_embed=nn.Embedding(5, config.n_embed),
+                pos_embed=nn.Embedding(config.window_size, config.n_embed),
+                blocks=nn.ModuleList(
+                    [Block(config) for _ in range(self.config.n_layer)]
+                ),
+                norm=nn.LayerNorm(config.n_embed),
+            )
+            if getattr(config, "seg_stage2_has_temporal_embed", False):
+                transformer_modules["temporal_embed"] = nn.Embedding(
+                    int(config.seg_stage2_max_context_frames),
+                    config.n_embed,
+                )
+
+            self.transformer = nn.ModuleDict(transformer_modules)
             if config.transformer_weight is not None:
-                self.transformer.load_state_dict(config.transformer_weight, strict=True)
+                self.transformer.load_state_dict(
+                    config.transformer_weight,
+                    strict=True,
+                )
                 print("*" * 50 + " transformer loaded")
             else:
                 print("*" * 50 + " transformer random initialized")
@@ -555,7 +561,7 @@ class SEG(Transformer):
         
         # training related
         self.train_dataloader       = torch.utils.data.DataLoader(self.config.train_dataset, batch_size=self.config.batch_size, shuffle=True, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)
-        self.valid_dataloader       = torch.utils.data.DataLoader(self.config.valid_dataset, batch_size=self.config.batch_size, shuffle=True, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)
+        self.valid_dataloader       = torch.utils.data.DataLoader(self.config.valid_dataset, batch_size=self.config.batch_size, shuffle=False, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)
         self.amp = torch.amp.autocast(device_type = "cuda")
         self.scaler = torch.amp.GradScaler(device = "cuda")
         self.optimizer = torch.optim.AdamW(get_param_groups(self, self.config.wd, self.config.encoder_lr_mult, self.config.transformer_lr_mult))
@@ -724,29 +730,229 @@ class SEG(Transformer):
                 self._maybe_set_pyramid_feats(tokens=tokens)
                 return tokens
     
-    def forward_transformer(self, x):
-        B, T, C = x.shape
-        ids = torch.ones(B, T, dtype=torch.int64, device=x.device) * 2  # 1 for image, 2 for event
-        modality_emb = self.transformer.modality_embed(ids)
-        
-        # Interpolate positional embeddings if resolution changes (e.g. during TTA)
+    def forward_encoder_sequence(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode an aligned event history with the shared Stage-1 ViT.
+
+        Args:
+            x: [B, F, C, H, W]
+
+        Returns:
+            Stage-1 patch tokens [B, F, N, D].
+        """
+        if x.ndim != 5:
+            raise ValueError(f"Expected temporal input [B,F,C,H,W], got {tuple(x.shape)}")
+
+        B, Fm, C, H, W = x.shape
+        flat = x.reshape(B * Fm, C, H, W)
+        tokens = self.forward_encoder(flat)
+        if tokens.ndim != 3:
+            raise RuntimeError(f"Unexpected Stage-1 token shape: {tuple(tokens.shape)}")
+        return tokens.reshape(B, Fm, tokens.shape[1], tokens.shape[2])
+
+    @staticmethod
+    def _covering_starts(length: int, window: int) -> list[int]:
+        """Evenly cover a 1-D grid with fixed-size windows."""
+        if window <= 0 or length < window:
+            raise ValueError(f"Cannot cover length={length} with window={window}")
+        if length == window:
+            return [0]
+        n_windows = int(math.ceil(length / window))
+        max_start = length - window
+        starts = [
+            int(round(i * max_start / (n_windows - 1)))
+            for i in range(n_windows)
+        ]
+        # Rounding can only create duplicates for tiny edge cases; remove them
+        # while preserving order.
+        return list(dict.fromkeys(starts))
+
+    def forward_event_jepa_temporal(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Faithful V1 temporal transfer over tiled 16x16 patch windows.
+
+        V1 was pretrained on four 224x224 DSEC event frames.  With ViT-S/14,
+        that is exactly 16x16=256 Stage-1 patch tokens per frame.  DSEC
+        segmentation uses a larger 32x46 patch grid.  Instead of collapsing
+        spatial resolution or inventing unseen spatial positions, cover the
+        full grid with 16x16 token windows.  Each tile is processed by the
+        *exact* Event-JEPA online-encoder semantics:
+
+            spatial pos + temporal pos + event modality
+            -> non-causal 12-layer Transformer -> LayerNorm
+
+        The contextualized tokens for the current (last) frame are stitched
+        back to the original high-resolution patch grid.  Overlapping tile
+        predictions are averaged.
+        """
+        if tokens.ndim != 4:
+            raise ValueError(
+                f"Expected Stage-1 history [B,F,N,D], got {tuple(tokens.shape)}"
+            )
+        if getattr(self.config, "seg_stage2_source", None) != "event_jepa":
+            raise RuntimeError(
+                "forward_event_jepa_temporal requires an Event-JEPA checkpoint"
+            )
+        if "temporal_embed" not in self.transformer:
+            raise RuntimeError("Event-JEPA temporal_embed is missing")
+
+        B, frames, N, D = tokens.shape
+        expected_frames = int(getattr(self.config, "seg_stage2_context_frames", frames))
+        if frames != expected_frames:
+            raise ValueError(
+                f"Event-JEPA expects {expected_frames} context frames, got {frames}"
+            )
+
         H_grid = self._encoder_hw[0] // self.config.P
         W_grid = self._encoder_hw[1] // self.config.P
-        H_orig = self.config.H // self.config.P
-        W_orig = self.config.W // self.config.P
+        if H_grid * W_grid != N:
+            raise RuntimeError(
+                f"Stage-1 token/grid mismatch: N={N}, grid={H_grid}x{W_grid}"
+            )
 
-        if (H_grid != H_orig or W_grid != W_orig) and (H_grid * W_grid == T):
-            N_orig = H_orig * W_orig
-            pos_weight = self.transformer.pos_embed.weight[:N_orig]
-            pos_weight = pos_weight.transpose(0, 1).reshape(1, C, H_orig, W_orig)
-            pos_emb = F.interpolate(pos_weight, size=(H_grid, W_grid), mode='bicubic', align_corners=False)
-            pos_emb = pos_emb.flatten(2).transpose(1, 2).squeeze(0)
-        else:
-            pos = torch.arange(0, T, dtype=torch.long, device=x.device).clamp(max=self.config.window_size - 1)
-            pos_emb = self.transformer.pos_embed(pos)
+        tile_h, tile_w = tuple(
+            int(v) for v in self.config.seg_stage2_pretrain_grid
+        )
+        tile_tokens = tile_h * tile_w
+        if tile_tokens != int(self.config.seg_stage2_pretrain_spatial_tokens):
+            raise RuntimeError("Event-JEPA tile/grid metadata is inconsistent")
+
+        grid = tokens.reshape(B, frames, H_grid, W_grid, D)
+        y_starts = self._covering_starts(H_grid, tile_h)
+        x_starts = self._covering_starts(W_grid, tile_w)
+
+        tiles = []
+        coords = []
+        for y0 in y_starts:
+            for x0 in x_starts:
+                tile = grid[
+                    :, :, y0 : y0 + tile_h, x0 : x0 + tile_w, :
+                ]
+                tile = tile.reshape(B, frames, tile_tokens, D)
+                tiles.append(tile)
+                coords.append((y0, x0))
+
+        # [B, K, F, 256, D] -> [B*K, F, 256, D]
+        tiled = torch.stack(tiles, dim=1)
+        K = tiled.shape[1]
+        tiled = tiled.reshape(B * K, frames, tile_tokens, D)
+
+        spatial_ids = torch.arange(tile_tokens, device=tokens.device)
+        temporal_ids = torch.arange(frames, device=tokens.device)
+        modality_ids = torch.full(
+            (B * K, frames, tile_tokens),
+            2,
+            dtype=torch.long,
+            device=tokens.device,
+        )
+
+        z = tiled
+        z = z + self.transformer.pos_embed(spatial_ids)[None, None, :, :]
+        z = z + self.transformer.temporal_embed(temporal_ids)[None, :, None, :]
+        z = z + self.transformer.modality_embed(modality_ids)
+        z = z.reshape(B * K, frames * tile_tokens, D)
+
+        for blk in self.transformer.blocks:
+            z = blk(z, is_causal=False)
+        z = self.transformer.norm(z)
+
+        # Last 256 tokens are the current frame after temporal contextualization.
+        z = z.reshape(B, K, frames, tile_tokens, D)[:, :, -1]
+
+        canvas = z.new_zeros((B, D, H_grid, W_grid))
+        weight = z.new_zeros((1, 1, H_grid, W_grid))
+        ones = z.new_ones((1, 1, tile_h, tile_w))
+
+        for k, (y0, x0) in enumerate(coords):
+            tile = z[:, k].transpose(1, 2).reshape(B, D, tile_h, tile_w)
+            pad = (
+                x0,
+                W_grid - x0 - tile_w,
+                y0,
+                H_grid - y0 - tile_h,
+            )
+            canvas = canvas + F.pad(tile, pad)
+            weight = weight + F.pad(ones, pad)
+
+        if torch.any(weight == 0):
+            raise RuntimeError("Temporal tiling left uncovered Stage-1 patch positions")
+
+        current = canvas / weight
+        return current.flatten(2).transpose(1, 2)
+
+    def forward_transformer(self, x):
+        """Apply the Stage-2 encoder with a resolution-aware spatial adapter.
+
+        Stage-2 pretraining learned spatial position embeddings on a 16x16
+        patch grid (256 positions).  DSEC segmentation uses a 32x46 grid.
+        We therefore interpolate only the learned spatial prefix instead of
+        treating pos_embed[256:1472] as spatial positions.
+
+        For Event-JEPA, a single-frame downstream sample corresponds to
+        temporal slot 0, so temporal_embed[0] is retained as in pretraining.
+        """
+        B, T, C = x.shape
+        ids = torch.full(
+            (B, T),
+            2,
+            dtype=torch.int64,
+            device=x.device,
+        )
+        modality_emb = self.transformer.modality_embed(ids)
+
+        H_grid = self._encoder_hw[0] // self.config.P
+        W_grid = self._encoder_hw[1] // self.config.P
+        if H_grid * W_grid != T:
+            raise RuntimeError(
+                f"token/grid mismatch: tokens={T}, grid={H_grid}x{W_grid}"
+            )
+
+        base_tokens = int(
+            getattr(
+                self.config,
+                "seg_stage2_pretrain_spatial_tokens",
+                T,
+            )
+        )
+        base_h, base_w = getattr(
+            self.config,
+            "seg_stage2_pretrain_grid",
+            (H_grid, W_grid),
+        )
+        base_h, base_w = int(base_h), int(base_w)
+
+        if base_h * base_w != base_tokens:
+            raise RuntimeError(
+                f"invalid Stage-2 base grid {base_h}x{base_w} "
+                f"for {base_tokens} tokens"
+            )
+
+        # IMPORTANT: only the first base_tokens rows were trained as spatial
+        # patch positions.  Remaining rows in a 4096-entry table are not extra
+        # high-resolution spatial positions.
+        pos_weight = self.transformer.pos_embed.weight[:base_tokens]
+        pos_weight = (
+            pos_weight.transpose(0, 1)
+            .reshape(1, C, base_h, base_w)
+        )
+        if (H_grid, W_grid) != (base_h, base_w):
+            pos_weight = F.interpolate(
+                pos_weight,
+                size=(H_grid, W_grid),
+                mode="bicubic",
+                align_corners=False,
+            )
+        pos_emb = pos_weight.flatten(2).transpose(1, 2)
 
         x_ = x + pos_emb + modality_emb
-        for i, blk in enumerate(self.transformer.blocks):
+
+        # Event-JEPA used a separate temporal embedding during pretraining.
+        # Single-frame semantic segmentation is temporal slot 0.
+        if "temporal_embed" in self.transformer:
+            temporal0 = self.transformer.temporal_embed.weight[0]
+            x_ = x_ + temporal0.view(1, 1, C)
+
+        for blk in self.transformer.blocks:
+            # Event-JEPA is non-causal.  GEP downstream in seg.py is also
+            # intentionally used non-causally; keep that protocol unchanged.
             x_ = blk(x_)
         x_ = self.transformer.norm(x_)
         return x_
@@ -796,6 +1002,26 @@ class SEG(Transformer):
         return logits
 
     def _forward_logits(self, x: torch.Tensor):
+        if x.ndim == 5:
+            # Temporal DSEC protocol: [B, history, C, H, W].
+            sequence_tokens = self.forward_encoder_sequence(x)
+
+            if isinstance(self.transformer, nn.Identity):
+                # Causal-history Stage-1 control: use the current frame only.
+                tokens = sequence_tokens[:, -1]
+            elif getattr(self.config, "seg_stage2_source", None) == "event_jepa":
+                tokens = self.forward_event_jepa_temporal(sequence_tokens)
+            else:
+                raise RuntimeError(
+                    "Temporal segmentation for this Stage-2 source is not yet "
+                    "implemented; do not silently fall back to the single-frame path."
+                )
+
+            return self.forward_decoder(tokens)
+
+        if x.ndim != 4:
+            raise ValueError(f"Expected 4D or 5D segmentation input, got {tuple(x.shape)}")
+
         tokens = self.forward_encoder(x)
         if not isinstance(self.transformer, nn.Identity):
             tokens = self.forward_transformer(tokens)
@@ -890,6 +1116,9 @@ class SEG(Transformer):
     @torch.no_grad()
     def visualize(self, image, pred, labels, name, alpha=0.7, n=8):
         '''logits and labels.shape: [batch_size, height, width]'''
+        # Temporal samples are [B,F,C,H,W]; visualize the current/last frame.
+        if image.ndim == 5:
+            image = image[:, -1]
         # full‑res original image (unnormalize)
         if self.config.type == "EL":
             if len(self.config.ME) == image.shape[1]:
@@ -918,55 +1147,135 @@ class SEG(Transformer):
         )
         torchvision.utils.save_image(rendered, f"src/{name}.png")
     
-    def train_step(self, x, y, global_step):
+    def train_step(self, x, y, global_step, micro_step):
         x, y = x.to(self.config.device), y.to(self.config.device)
         t0 = time.time()
         self.train()
-        current_lr = get_lr(global_step, self.config.warmup_steps, self.config.lr, self.config.steps, self.config.min_lr)
+
+        accum_steps = getattr(self.config, "grad_accum_steps", 1)
+
+        current_lr = get_lr(
+            global_step,
+            self.config.warmup_steps,
+            self.config.lr,
+            self.config.steps,
+            self.config.min_lr,
+        )
         for param_group in self.optimizer.param_groups:
-            param_group['lr'] = current_lr * param_group["lr_mult"]
-            
+            param_group["lr"] = current_lr * param_group["lr_mult"]
+
         with self.amp:
-            pred, loss = self.forward(x, y)
+            pred, raw_loss = self.forward(x, y)
+            loss = raw_loss / accum_steps
+
         main_pred = pred[0] if isinstance(pred, tuple) else pred
-        
+
         self.scaler.scale(loss).backward()
-        self.scaler.unscale_(self.optimizer)
-        grad_norm = nn.utils.clip_grad_norm_(parameters=self.parameters(), max_norm=1.,)
-        nn.utils.clip_grad_value_(self.parameters(), clip_value=0.5)
-        self.scaler.step(self.optimizer)
-        self.scaler.update()
-        self.optimizer.zero_grad()
+
+        is_update = (micro_step + 1) == accum_steps
+        grad_norm = None
+
+        if is_update:
+            self.scaler.unscale_(self.optimizer)
+            grad_norm = nn.utils.clip_grad_norm_(
+                parameters=self.parameters(),
+                max_norm=1.0,
+            )
+            nn.utils.clip_grad_value_(
+                self.parameters(),
+                clip_value=0.5,
+            )
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.optimizer.zero_grad(set_to_none=True)
 
         t1 = time.time()
-        if self.writer is not None and (global_step + 1) % self.config.log_every == 0:
-            self.writer.add_scalar("loss/train", loss.item(), global_step + 1)
+
+        if (
+            is_update
+            and self.writer is not None
+            and (global_step + 1) % self.config.log_every == 0
+        ):
+            self.writer.add_scalar(
+                "loss/train",
+                raw_loss.item(),
+                global_step + 1,
+            )
             for key, value in self._loss_components.items():
-                self.writer.add_scalar(f"loss/{key}", value, global_step + 1)
-            dt = (t1 - t0)
-            self.visualize(x, torch.argmax(main_pred, dim=1), y, name="vis_seg_train")
-            num_tokens_per_secend =  self.config.batch_size * self.config.n_tokens_per_image / dt
-            print(f"step: {global_step + 1}, lr: {current_lr :.8f}, loss: {loss.item() :.4f}, grad_norm: {grad_norm:.4f}, input: {x.shape}, dt:{dt: .2f}, throughput: {num_tokens_per_secend :.2f} t/s")
-        
+                self.writer.add_scalar(
+                    f"loss/{key}",
+                    value,
+                    global_step + 1,
+                )
+
+            self.visualize(
+                x,
+                torch.argmax(main_pred, dim=1),
+                y,
+                name="vis_seg_train",
+            )
+
+            effective_batch = self.config.batch_size * accum_steps
+            print(
+                f"step: {global_step + 1}, "
+                f"lr: {current_lr:.8f}, "
+                f"loss: {raw_loss.item():.4f}, "
+                f"grad_norm: {float(grad_norm):.4f}, "
+                f"micro_batch: {self.config.batch_size}, "
+                f"effective_batch: {effective_batch}, "
+                f"input: {x.shape}, "
+                f"dt: {t1 - t0:.2f}"
+            )
+
     def start(self):
-        # self.validate(0)
         if getattr(self.config, "eval_only", False):
             print("Segmentation eval-only mode: skipping training loop.")
             return
+
         train_iter = iter(self.train_dataloader)
+        accum_steps = getattr(self.config, "grad_accum_steps", 1)
 
-        for step in range(self.config.steps):
-            try:
-                x, y = next(train_iter)
-            except StopIteration:
-                train_iter = iter(self.train_dataloader)
-                x, y = next(train_iter)
+        # Keep the original LR schedule length for fair comparison,
+        # but allow a shorter controlled downstream run.
+        run_steps = int(
+            os.environ.get("SEG_MAX_STEPS", self.config.steps)
+        )
+        if run_steps < 1 or run_steps > self.config.steps:
+            raise ValueError(
+                f"SEG_MAX_STEPS must be in [1, {self.config.steps}], "
+                f"got {run_steps}"
+            )
 
-            if step == 0:
-                summary(self, input_data=(x, y), device=self.config.device, depth=2)
-            self.train_step(x, y, step)
+        print(
+            f"micro batch: {self.config.batch_size}, "
+            f"grad accum: {accum_steps}, "
+            f"effective batch: {self.config.batch_size * accum_steps}, "
+            f"run steps: {run_steps}, "
+            f"lr schedule steps: {self.config.steps}"
+        )
 
-            if (step + 1) % self.config.valid_every == 0 or (step + 1) == self.config.steps:
+        self.optimizer.zero_grad(set_to_none=True)
+
+        # `step` counts optimizer updates, NOT micro-batches.
+        for step in range(run_steps):
+            for micro_step in range(accum_steps):
+                try:
+                    x, y = next(train_iter)
+                except StopIteration:
+                    train_iter = iter(self.train_dataloader)
+                    x, y = next(train_iter)
+
+                self.train_step(
+                    x,
+                    y,
+                    step,
+                    micro_step,
+                )
+
+            if (
+                (step + 1) % self.config.valid_every == 0
+                or (step + 1) == run_steps
+            ):
                 self.validate(step)
     
     @ torch.no_grad()
@@ -977,8 +1286,6 @@ class SEG(Transformer):
         self.acc.reset()
         last_batch = None
         for i, (x, y) in enumerate(tqdm(self.valid_dataloader)):
-            if i > 32 and not getattr(self.config, "eval_only", False):
-                break
             x, y = x.to(self.config.device), y.to(self.config.device)
             preds, loss = self.forward(x, y)
             valid_loss += loss.item()
@@ -1028,7 +1335,10 @@ class SEG(Transformer):
             "epoch": step,}
         if not self.is_ecddp and self.pyramid_head is not None:
             param_dict["pyramid_head"] = self.pyramid_head.state_dict()
-        model_save_path = f"/data/storage/jianwen/cache/ckpts/{self.now}_seg"
+        model_save_path = os.environ.get(
+            "SEG_OUTPUT_DIR",
+            f"runs/dsec_seg/{self.now}_seg",
+        )
         os.makedirs(model_save_path, exist_ok=True)
         print(f"------------------------- saving model to: {model_save_path}")
         torch.save(param_dict, os.path.join(model_save_path, f"epoch{step + 1}_{valid_loss:.4f}.pt"))

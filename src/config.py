@@ -173,6 +173,20 @@ class SegConfig(Config):
         self._init_mem_defaults()
         self._init_ecddp_defaults()
         self._apply_mode_overrides()
+
+        # Runtime overrides for controlled segmentation experiments.
+        self.batch_size = int(
+            os.environ.get("SEG_MICRO_BATCH", self.batch_size)
+        )
+        self.grad_accum_steps = int(
+            os.environ.get(
+                "SEG_GRAD_ACCUM",
+                getattr(self, "grad_accum_steps", 1),
+            )
+        )
+
+        self._load_seg_transformer_from_env()
+        self._configure_temporal_segmentation()
         self._init_palette()
         self._build_preprocessors()
         self._build_datasets()
@@ -185,14 +199,14 @@ class SegConfig(Config):
     # ------------------------------------------------------------------ #
 
     def _init_common_options(self):
-        self.device = "cuda:1"
+        self.device = "cuda:0"
         self.data = "event"
         self.type = "EL" if self.data == "event" else "IL"
         self.dataset = "dsec"  # ["dsec", "ddd17"]
         self.eval_only = False
         # self.eval_checkpoint = "/data/storage/jianwen/cache/ckpts/2025-11-14-02:04_seg/epoch8000_0.8904.pt"
         self.eval_checkpoint = None
-        self.manual_encoder_weight_path = "/data/storage/jianwen/cache/ckpt_matters/gra_nima_16x.pt"
+        self.manual_encoder_weight_path = "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt"
 
         self.vit = "small"
         self.vit_backbone = "dinov2"  # ["dinov2", "dinov3"]
@@ -203,7 +217,8 @@ class SegConfig(Config):
         self.wd = 1e-5
         self.transformer_lr_mult = 0.1
         self.encoder_lr_mult = 0.01
-        self.batch_size = 16
+        self.batch_size = 8
+        self.grad_accum_steps = 2
         self.n_workers = 8
         self.min_lr = 0.0
         self.warmup_steps = 100
@@ -218,8 +233,8 @@ class SegConfig(Config):
         self.pyramid_head_dim = 128
         self.scale_range = (0.5, 2.0)
         self.cat_max_ratio = 0.75
-        self.use_upernet = True
-        self.use_aux_head = True
+        self.use_upernet = False
+        self.use_aux_head = False
 
         # shared test-time augmentation defaults
         self.tta_enable = False
@@ -319,7 +334,7 @@ class SegConfig(Config):
                     self.P = 32
                     self.n_embed = 768
             else:
-                encoder_weight = "/data/storage/jianwen/cache/ckpt_matters/gra_nima_16x.pt"
+                encoder_weight = "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt"
                 # transformer_weight = None
 
                 if 'encoder_weight' in locals() and encoder_weight is not None:
@@ -354,11 +369,195 @@ class SegConfig(Config):
                 else:
                     self.P = 14
             self.encoder_lr_mult = 0.1 if getattr(self, "event_encoder_weight", None) is None else 0.01
-            self.tta_enable = True
-            self.tta_scales = (0.8, 1.0, 1.2)
-            self.tta_flip = True
+            self.tta_enable = False
+            self.tta_scales = (1.0,)
+            self.tta_flip = False
 
         self.n_tokens_per_image = (self.H // self.P) * (self.W // self.P)
+
+    def _load_seg_transformer_from_env(self):
+        """Load a Stage-2 representation checkpoint for DSEC segmentation.
+
+        Accepted formats:
+        1) matched GEP-AR checkpoint with top-level ``transformer`` + ``config``;
+        2) raw Event-JEPA checkpoint with top-level ``online_encoder`` + ``config``;
+        3) legacy Event-JEPA export with top-level ``transformer``.  The legacy
+           export is rejected for Event-JEPA because it omits temporal_embed.
+
+        The downstream adapter needs to know how many spatial positions were
+        actually trained during Stage-2.  For both current matched baselines
+        this is ``n_tokens=256`` (16x16), even though pos_embed has 4096 rows.
+        """
+        checkpoint = os.environ.get("SEG_TRANSFORMER_CKPT")
+        if not checkpoint:
+            self.seg_stage2_source = "stage1"
+            self.seg_stage2_context_frames = 1
+            return
+
+        checkpoint = os.path.abspath(checkpoint)
+        if not os.path.isfile(checkpoint):
+            raise FileNotFoundError(
+                f"SEG_TRANSFORMER_CKPT not found: {checkpoint}"
+            )
+
+        payload = torch.load(
+            checkpoint,
+            map_location="cpu",
+            weights_only=False,
+        )
+        if not isinstance(payload, dict):
+            raise TypeError(f"{checkpoint}: checkpoint must be a dict")
+
+        cfg = dict(payload.get("config", payload.get("metadata", {})) or {})
+
+        # Raw Event-JEPA checkpoint: retain temporal_embed rather than losing it
+        # through the old GEP-only export path.
+        if "online_encoder" in payload:
+            online = payload["online_encoder"]
+            if not isinstance(online, dict):
+                raise TypeError(f"{checkpoint}: online_encoder must be a state_dict")
+
+            prefix = "transformer."
+            transformer = {
+                key[len(prefix):]: value
+                for key, value in online.items()
+                if key.startswith(prefix)
+            }
+            temporal = online.get("temporal_embed.weight")
+            if temporal is None:
+                raise KeyError(
+                    f"{checkpoint}: Event-JEPA checkpoint missing temporal_embed.weight"
+                )
+            transformer["temporal_embed.weight"] = temporal
+            source = "event_jepa"
+            self.seg_stage2_has_temporal_embed = True
+            self.seg_stage2_max_context_frames = int(temporal.shape[0])
+            self.seg_stage2_context_frames = int(cfg.get("context_frames", 1))
+
+        elif "transformer" in payload:
+            transformer = payload["transformer"]
+            if not isinstance(transformer, dict):
+                raise TypeError(f"{checkpoint}: transformer must be a state_dict")
+            source = str(payload.get("source", payload.get("method", "gep-ar")))
+
+            # The old Event-JEPA export intentionally contained only the GEP
+            # transformer core and therefore cannot reproduce Event-JEPA's
+            # encoder semantics.  Require the raw checkpoint for this test.
+            if source == "event_jepa":
+                raise ValueError(
+                    "Use the raw Event-JEPA checkpoint for segmentation, not "
+                    "gep_transformer.pt; the legacy export omits temporal_embed."
+                )
+            self.seg_stage2_has_temporal_embed = False
+            self.seg_stage2_max_context_frames = 0
+            self.seg_stage2_context_frames = int(cfg.get("frames", 1))
+        else:
+            raise KeyError(
+                f"{checkpoint}: expected either online_encoder or transformer"
+            )
+
+        pos_weight = transformer.get("pos_embed.weight")
+        if pos_weight is None:
+            raise KeyError(f"{checkpoint}: missing pos_embed.weight")
+
+        exported_window, exported_dim = pos_weight.shape
+        if int(exported_dim) != int(self.n_embed):
+            raise ValueError(
+                f"Transformer dim mismatch: checkpoint={exported_dim}, "
+                f"segmentation={self.n_embed}"
+            )
+
+        block_ids = []
+        for key in transformer:
+            if key.startswith("blocks."):
+                parts = key.split(".")
+                if len(parts) > 1 and parts[1].isdigit():
+                    block_ids.append(int(parts[1]))
+        if not block_ids:
+            raise KeyError(f"{checkpoint}: cannot infer Transformer blocks")
+
+        # n_tokens is the number of *spatial* patch positions actually used
+        # during Stage-2 pretraining.  For the current formal V1 runs it is 256.
+        spatial_tokens = int(cfg.get("n_tokens", 256))
+        side = int(math.isqrt(spatial_tokens))
+        if side * side != spatial_tokens:
+            raise ValueError(
+                f"Stage-2 spatial token count must form a square grid; "
+                f"got n_tokens={spatial_tokens}"
+            )
+        if spatial_tokens > int(exported_window):
+            raise ValueError(
+                f"n_tokens={spatial_tokens} exceeds pos_embed size={exported_window}"
+            )
+
+        self.window_size = int(exported_window)
+        self.n_layer = max(block_ids) + 1
+        self.transformer_weight = transformer
+        self.seg_stage2_source = source
+        self.seg_stage2_pretrain_spatial_tokens = spatial_tokens
+        self.seg_stage2_pretrain_grid = (side, side)
+
+        print(
+            "SEG Stage-2 loaded:"
+            f" source={source},"
+            f" layers={self.n_layer},"
+            f" dim={self.n_embed},"
+            f" window={self.window_size},"
+            f" spatial_tokens={spatial_tokens},"
+            f" spatial_grid={side}x{side},"
+            f" temporal_embed={self.seg_stage2_has_temporal_embed},"
+            f" checkpoint={checkpoint}"
+        )
+
+    def _configure_temporal_segmentation(self):
+        """Resolve the history length used by the segmentation dataset.
+
+        Event-JEPA V1 was pretrained with an explicit temporal context.  When
+        a raw Event-JEPA checkpoint is supplied, use that exact context length
+        by default.  ``SEG_TEMPORAL_CONTEXT`` can be used for explicit control
+        experiments, but Event-JEPA itself must match its checkpoint contract.
+        """
+        requested = os.environ.get("SEG_TEMPORAL_CONTEXT")
+        source = getattr(self, "seg_stage2_source", "stage1")
+
+        if requested is None:
+            if source == "event_jepa":
+                context = int(self.seg_stage2_context_frames)
+            else:
+                context = 1
+        else:
+            context = int(requested)
+
+        if context < 1:
+            raise ValueError("SEG_TEMPORAL_CONTEXT must be >= 1")
+
+        if source == "event_jepa":
+            expected = int(self.seg_stage2_context_frames)
+            if context != expected:
+                raise ValueError(
+                    f"Event-JEPA checkpoint was trained with context_frames={expected}, "
+                    f"but segmentation requested {context}."
+                )
+            if not getattr(self, "seg_stage2_has_temporal_embed", False):
+                raise RuntimeError("Event-JEPA temporal segmentation requires temporal_embed")
+
+        self.seg_temporal_context = context
+        self.seg_temporal_enabled = context > 1
+        self.seg_temporal_modalities = tuple("event" for _ in range(context))
+
+        if self.seg_temporal_enabled and self.dataset != "dsec":
+            raise ValueError("Temporal segmentation is currently implemented only for DSEC")
+        if self.seg_temporal_enabled and self.encoder_mode != "ours":
+            raise ValueError("Temporal segmentation currently requires encoder_mode='ours'")
+        if self.seg_temporal_enabled and self.event_backbone != "vit":
+            raise ValueError("Temporal segmentation currently requires the ViT event backbone")
+
+        print(
+            "SEG temporal protocol:"
+            f" enabled={self.seg_temporal_enabled},"
+            f" context={self.seg_temporal_context},"
+            f" source={source}"
+        )
 
     def _align_spatial_to_stride(self, stride: int):
         def _align(value: int, step: int) -> int:
@@ -452,33 +651,92 @@ class SegConfig(Config):
                 ]
             )
         else:
-            common_train = [
-                ToTensor(origi_H=self.origi_H, type=self.type),
-                Normalize(self.ME, self.SE, self.MI, self.SI, type=self.type),
-                RandomSwapEventRedBlue(type=self.type),
-                RandomHorizontalFlip(p=0.5),
-                ResizeKeepRatio(short_side_target_size=self.H, scale_range=self.scale_range, type=self.type),
-                PadToMinSide(target=(self.H, self.W), pad_x1=0, pad_x2=self.ignore_index),
-                RandomCrop(
-                    crop_size=(self.H, self.W),
-                    cat_max_ratio=self.cat_max_ratio,
-                    ignore_index=self.ignore_index,
-                    type=self.type,
-                ),
-            ]
-            common_valid = [
-                ToTensor(origi_H=self.origi_H, type=self.type),
-                Normalize(self.ME, self.SE, self.MI, self.SI, type=self.type),
-                ResizeKeepRatio(short_side_target_size=self.H, type=self.type),
-                PadToMinSide(target=(self.H, self.W), pad_x1=0, pad_x2=self.ignore_index),
-                CenterCrop((self.H, self.W)),
-            ]
-            self.train_preprocessors = PairedProcessor(common_train)
-            self.valid_preprocessors = PairedProcessor(common_valid)
+            if getattr(self, "seg_temporal_enabled", False):
+                modalities = self.seg_temporal_modalities
+                self.train_preprocessors = SequencePairedProcessor(
+                    [
+                        SequenceToTensor(
+                            type=self.type,
+                            modalities=modalities,
+                            origi_H=self.origi_H,
+                        ),
+                        SequenceNormalize(
+                            self.ME, self.SE, self.MI, self.SI,
+                            type=self.type,
+                            modalities=modalities,
+                        ),
+                        SequenceRandomSwapEventRedBlue(modalities=modalities),
+                        SequenceRandomHorizontalFlip(p=0.5),
+                        SequenceResizeKeepRatio(
+                            short_side_target_size=self.H,
+                            scale_range=self.scale_range,
+                            type=self.type,
+                        ),
+                        SequencePadToMinSide(
+                            target=(self.H, self.W),
+                            pad_x1=0,
+                            pad_x2=self.ignore_index,
+                        ),
+                        SequenceRandomCrop(
+                            crop_size=(self.H, self.W),
+                            cat_max_ratio=self.cat_max_ratio,
+                            ignore_index=self.ignore_index,
+                            type=self.type,
+                        ),
+                    ]
+                )
+                self.valid_preprocessors = SequencePairedProcessor(
+                    [
+                        SequenceToTensor(
+                            type=self.type,
+                            modalities=modalities,
+                            origi_H=self.origi_H,
+                        ),
+                        SequenceNormalize(
+                            self.ME, self.SE, self.MI, self.SI,
+                            type=self.type,
+                            modalities=modalities,
+                        ),
+                        SequenceResizeKeepRatio(
+                            short_side_target_size=self.H,
+                            type=self.type,
+                        ),
+                        SequencePadToMinSide(
+                            target=(self.H, self.W),
+                            pad_x1=0,
+                            pad_x2=self.ignore_index,
+                        ),
+                        SequenceCenterCrop((self.H, self.W)),
+                    ]
+                )
+            else:
+                common_train = [
+                    ToTensor(origi_H=self.origi_H, type=self.type),
+                    Normalize(self.ME, self.SE, self.MI, self.SI, type=self.type),
+                    RandomSwapEventRedBlue(type=self.type),
+                    RandomHorizontalFlip(p=0.5),
+                    ResizeKeepRatio(short_side_target_size=self.H, scale_range=self.scale_range, type=self.type),
+                    PadToMinSide(target=(self.H, self.W), pad_x1=0, pad_x2=self.ignore_index),
+                    RandomCrop(
+                        crop_size=(self.H, self.W),
+                        cat_max_ratio=self.cat_max_ratio,
+                        ignore_index=self.ignore_index,
+                        type=self.type,
+                    ),
+                ]
+                common_valid = [
+                    ToTensor(origi_H=self.origi_H, type=self.type),
+                    Normalize(self.ME, self.SE, self.MI, self.SI, type=self.type),
+                    ResizeKeepRatio(short_side_target_size=self.H, type=self.type),
+                    PadToMinSide(target=(self.H, self.W), pad_x1=0, pad_x2=self.ignore_index),
+                    CenterCrop((self.H, self.W)),
+                ]
+                self.train_preprocessors = PairedProcessor(common_train)
+                self.valid_preprocessors = PairedProcessor(common_valid)
 
     def _build_datasets(self):
         if self.dataset == "dsec":
-            dsec_root = "/data/storage/jianwen/DSEC"
+            dsec_root = "/home/tom/event-jepa/datasets/DSEC"
             if self.encoder_mode == "ecddp":
                 self.train_dataset = DSECECDDPEventDataset(
                     root_dir=dsec_root,
@@ -507,20 +765,36 @@ class SegConfig(Config):
                         )
                     self.n_tokens_per_image = (self.H // self.P) * (self.W // self.P)
             else:
-                self.train_dataset = DSECSegmentDataset(
-                    root_dir=dsec_root,
-                    split="train",
-                    data=self.data,
-                    C=self.C,
-                    transform=self.train_preprocessors,
-                )
-                self.valid_dataset = DSECSegmentDataset(
-                    root_dir=dsec_root,
-                    split="test",
-                    data=self.data,
-                    C=self.C,
-                    transform=self.valid_preprocessors,
-                )
+                if getattr(self, "seg_temporal_enabled", False):
+                    self.train_dataset = DSECSegmentSequenceDataset(
+                        root_dir=dsec_root,
+                        split="train",
+                        C=self.C,
+                        frames_per_sample=self.seg_temporal_context,
+                        transform=self.train_preprocessors,
+                    )
+                    self.valid_dataset = DSECSegmentSequenceDataset(
+                        root_dir=dsec_root,
+                        split="test",
+                        C=self.C,
+                        frames_per_sample=self.seg_temporal_context,
+                        transform=self.valid_preprocessors,
+                    )
+                else:
+                    self.train_dataset = DSECSegmentDataset(
+                        root_dir=dsec_root,
+                        split="train",
+                        data=self.data,
+                        C=self.C,
+                        transform=self.train_preprocessors,
+                    )
+                    self.valid_dataset = DSECSegmentDataset(
+                        root_dir=dsec_root,
+                        split="test",
+                        data=self.data,
+                        C=self.C,
+                        transform=self.valid_preprocessors,
+                    )
         elif self.dataset == "ddd17":
             self.train_dataset = DDD17SegmentDataset(
                 split="train",

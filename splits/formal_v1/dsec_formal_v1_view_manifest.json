@@ -1,0 +1,280 @@
+{
+  "protocol": "formal_v1_dsec_stage2_view",
+  "source": "/home/tom/event-jepa/datasets/DSEC",
+  "formal_root": "/home/tom/event-jepa/datasets/DSEC_formal_v1_stage2",
+  "train_split": "train_images",
+  "validation_split": "test_images",
+  "train_sequences": [
+    {
+      "sequence": "interlaken_00_c",
+      "tokens": 537,
+      "windows": 530,
+      "first_timestamp": 51805200790,
+      "last_timestamp": 51832000426
+    },
+    {
+      "sequence": "interlaken_00_d",
+      "tokens": 1991,
+      "windows": 1984,
+      "first_timestamp": 51832500407,
+      "last_timestamp": 51932000538
+    },
+    {
+      "sequence": "interlaken_00_e",
+      "tokens": 1991,
+      "windows": 1984,
+      "first_timestamp": 51932500686,
+      "last_timestamp": 52032000464
+    },
+    {
+      "sequence": "zurich_city_00_a",
+      "tokens": 939,
+      "windows": 932,
+      "first_timestamp": 54718007586,
+      "last_timestamp": 54764907618
+    },
+    {
+      "sequence": "zurich_city_00_b",
+      "tokens": 1463,
+      "windows": 1456,
+      "first_timestamp": 54816707577,
+      "last_timestamp": 54889807539
+    },
+    {
+      "sequence": "zurich_city_01_b",
+      "tokens": 1325,
+      "windows": 1318,
+      "first_timestamp": 55650007582,
+      "last_timestamp": 55716207607
+    },
+    {
+      "sequence": "zurich_city_01_c",
+      "tokens": 977,
+      "windows": 970,
+      "first_timestamp": 55764607594,
+      "last_timestamp": 55813407583
+    },
+    {
+      "sequence": "zurich_city_01_d",
+      "tokens": 795,
+      "windows": 788,
+      "first_timestamp": 55830707573,
+      "last_timestamp": 55870407564
+    },
+    {
+      "sequence": "zurich_city_01_e",
+      "tokens": 1991,
+      "windows": 1984,
+      "first_timestamp": 55910007505,
+      "last_timestamp": 56009507517
+    },
+    {
+      "sequence": "zurich_city_01_f",
+      "tokens": 1573,
+      "windows": 1566,
+      "first_timestamp": 56010007474,
+      "last_timestamp": 56088607477
+    },
+    {
+      "sequence": "zurich_city_02_a",
+      "tokens": 235,
+      "windows": 228,
+      "first_timestamp": 56174807540,
+      "last_timestamp": 56186507531
+    },
+    {
+      "sequence": "zurich_city_02_b",
+      "tokens": 1225,
+      "windows": 1218,
+      "first_timestamp": 56246407530,
+      "last_timestamp": 56307607554
+    },
+    {
+      "sequence": "zurich_city_02_d",
+      "tokens": 1843,
+      "windows": 1836,
+      "first_timestamp": 56538407560,
+      "last_timestamp": 56630507538
+    },
+    {
+      "sequence": "zurich_city_02_e",
+      "tokens": 1845,
+      "windows": 1838,
+      "first_timestamp": 56631007499,
+      "last_timestamp": 56723207529
+    },
+    {
+      "sequence": "zurich_city_03_a",
+      "tokens": 883,
+      "windows": 876,
+      "first_timestamp": 57172707635,
+      "last_timestamp": 57216807514
+    },
+    {
+      "sequence": "zurich_city_04_a",
+      "tokens": 701,
+      "windows": 694,
+      "first_timestamp": 36470600624,
+      "last_timestamp": 36505600853
+    },
+    {
+      "sequence": "zurich_city_04_b",
+      "tokens": 269,
+      "windows": 262,
+      "first_timestamp": 36607300956,
+      "last_timestamp": 36620701555
+    },
+    {
+      "sequence": "zurich_city_04_c",
+      "tokens": 1181,
+      "windows": 1174,
+      "first_timestamp": 36653100850,
+      "last_timestamp": 36712100433
+    },
+    {
+      "sequence": "zurich_city_04_d",
+      "tokens": 957,
+      "windows": 950,
+      "first_timestamp": 36739600411,
+      "last_timestamp": 36787400400
+    },
+    {
+      "sequence": "zurich_city_04_e",
+      "tokens": 269,
+      "windows": 262,
+      "first_timestamp": 36880800398,
+      "last_timestamp": 36894200363
+    },
+    {
+      "sequence": "zurich_city_04_f",
+      "tokens": 859,
+      "windows": 852,
+      "first_timestamp": 36915000323,
+      "last_timestamp": 36957907527
+    },
+    {
+      "sequence": "zurich_city_05_a",
+      "tokens": 1753,
+      "windows": 1746,
+      "first_timestamp": 37379400825,
+      "last_timestamp": 37467001668
+    },
+    {
+      "sequence": "zurich_city_06_a",
+      "tokens": 1523,
+      "windows": 1516,
+      "first_timestamp": 41424200353,
+      "last_timestamp": 41500300151
+    },
+    {
+      "sequence": "zurich_city_07_a",
+      "tokens": 1463,
+      "windows": 1456,
+      "first_timestamp": 41776100175,
+      "last_timestamp": 41849200259
+    },
+    {
+      "sequence": "zurich_city_08_a",
+      "tokens": 787,
+      "windows": 780,
+      "first_timestamp": 39415400386,
+      "last_timestamp": 39454700492
+    },
+    {
+      "sequence": "zurich_city_09_a",
+      "tokens": 1813,
+      "windows": 1806,
+      "first_timestamp": 58051107631,
+      "last_timestamp": 58141707625
+    },
+    {
+      "sequence": "zurich_city_09_b",
+      "tokens": 367,
+      "windows": 360,
+      "first_timestamp": 58177507611,
+      "last_timestamp": 58195807611
+    },
+    {
+      "sequence": "zurich_city_09_c",
+      "tokens": 1323,
+      "windows": 1316,
+      "first_timestamp": 58288007532,
+      "last_timestamp": 58354107543
+    },
+    {
+      "sequence": "zurich_city_09_e",
+      "tokens": 817,
+      "windows": 810,
+      "first_timestamp": 58502707519,
+      "last_timestamp": 58543507510
+    },
+    {
+      "sequence": "zurich_city_10_a",
+      "tokens": 2315,
+      "windows": 2308,
+      "first_timestamp": 57267307977,
+      "last_timestamp": 57383007510
+    },
+    {
+      "sequence": "zurich_city_10_b",
+      "tokens": 2405,
+      "windows": 2398,
+      "first_timestamp": 57383507565,
+      "last_timestamp": 57503707123
+    },
+    {
+      "sequence": "zurich_city_11_a",
+      "tokens": 465,
+      "windows": 458,
+      "first_timestamp": 37060100430,
+      "last_timestamp": 37083300701
+    },
+    {
+      "sequence": "zurich_city_11_b",
+      "tokens": 1933,
+      "windows": 1926,
+      "first_timestamp": 37089400462,
+      "last_timestamp": 37186000746
+    }
+  ],
+  "val_sequences": [
+    {
+      "sequence": "interlaken_00_f",
+      "tokens": 1491,
+      "windows": 1484,
+      "first_timestamp": 52032500508,
+      "last_timestamp": 52107000451
+    },
+    {
+      "sequence": "interlaken_00_g",
+      "tokens": 1335,
+      "windows": 1328,
+      "first_timestamp": 52107500491,
+      "last_timestamp": 52174200332
+    },
+    {
+      "sequence": "thun_00_a",
+      "tokens": 239,
+      "windows": 232,
+      "first_timestamp": 49599200500,
+      "last_timestamp": 49611100436
+    },
+    {
+      "sequence": "zurich_city_09_d",
+      "tokens": 1699,
+      "windows": 1692,
+      "first_timestamp": 58391107532,
+      "last_timestamp": 58476007476
+    }
+  ],
+  "final_excluded_sequences": [
+    "zurich_city_01_a",
+    "zurich_city_02_c",
+    "zurich_city_05_b",
+    "zurich_city_11_c"
+  ],
+  "train_token_count": 40813,
+  "val_token_count": 4764,
+  "train_window_count": 40582,
+  "val_window_count": 4736
+}

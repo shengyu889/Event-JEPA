@@ -32,6 +32,9 @@ class EventJEPAConfig:
     ema_end: float = 0.9999
     precision: str = "bf16"
     grad_clip_norm: float = 1.0
+    residual_weight: float = 0.0
+    order_weight: float = 0.0
+    order_margin: float = 0.005
     log_every: int = 100
     validate_every: int = 1000
     save_every: int = 1000
@@ -50,6 +53,16 @@ class EventJEPAConfig:
             raise ValueError("horizons must be unique and increasing")
         if self.n_tokens * self.context_frames > self.max_positions:
             raise ValueError("context token count exceeds max_positions")
+        if self.residual_weight < 0:
+            raise ValueError("residual_weight must be nonnegative")
+        if self.order_weight < 0:
+            raise ValueError("order_weight must be nonnegative")
+        if self.order_margin < 0:
+            raise ValueError("order_margin must be nonnegative")
+        if self.order_weight > 0 and self.context_frames < 3:
+            raise ValueError(
+                "order objective requires context_frames >= 3"
+            )
         if self.precision not in {"fp32", "fp16", "bf16"}:
             raise ValueError("precision must be fp32, fp16, or bf16")
 

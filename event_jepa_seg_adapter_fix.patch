@@ -1,0 +1,284 @@
+--- src/config.py
++++ src/config.py
+@@ -375,18 +375,21 @@
+         self.n_tokens_per_image = (self.H // self.P) * (self.W // self.P)
+ 
+     def _load_seg_transformer_from_env(self):
+-        """
+-        Optional Stage-2 Transformer for controlled DSEC segmentation.
+-
+-        No SEG_TRANSFORMER_CKPT:
+-            Stage-1-only baseline.
++        """Load a Stage-2 representation checkpoint for DSEC segmentation.
+ 
+-        SEG_TRANSFORMER_CKPT=<checkpoint>:
+-            load checkpoint["transformer"] using the same downstream path
+-            for GEP-AR and Event-JEPA exports.
++        Accepted formats:
++        1) matched GEP-AR checkpoint with top-level ``transformer`` + ``config``;
++        2) raw Event-JEPA checkpoint with top-level ``online_encoder`` + ``config``;
++        3) legacy Event-JEPA export with top-level ``transformer``.  The legacy
++           export is rejected for Event-JEPA because it omits temporal_embed.
++
++        The downstream adapter needs to know how many spatial positions were
++        actually trained during Stage-2.  For both current matched baselines
++        this is ``n_tokens=256`` (16x16), even though pos_embed has 4096 rows.
+         """
+         checkpoint = os.environ.get("SEG_TRANSFORMER_CKPT")
+         if not checkpoint:
++            self.seg_stage2_source = "stage1"
+             return
+ 
+         checkpoint = os.path.abspath(checkpoint)
+@@ -400,27 +403,60 @@
+             map_location="cpu",
+             weights_only=False,
+         )
+-
+         if not isinstance(payload, dict):
+-            raise TypeError(
+-                f"{checkpoint}: checkpoint must be a dict"
+-            )
++            raise TypeError(f"{checkpoint}: checkpoint must be a dict")
+ 
+-        transformer = payload.get("transformer")
+-        if not isinstance(transformer, dict):
++        cfg = dict(payload.get("config", payload.get("metadata", {})) or {})
++
++        # Raw Event-JEPA checkpoint: retain temporal_embed rather than losing it
++        # through the old GEP-only export path.
++        if "online_encoder" in payload:
++            online = payload["online_encoder"]
++            if not isinstance(online, dict):
++                raise TypeError(f"{checkpoint}: online_encoder must be a state_dict")
++
++            prefix = "transformer."
++            transformer = {
++                key[len(prefix):]: value
++                for key, value in online.items()
++                if key.startswith(prefix)
++            }
++            temporal = online.get("temporal_embed.weight")
++            if temporal is None:
++                raise KeyError(
++                    f"{checkpoint}: Event-JEPA checkpoint missing temporal_embed.weight"
++                )
++            transformer["temporal_embed.weight"] = temporal
++            source = "event_jepa"
++            self.seg_stage2_has_temporal_embed = True
++            self.seg_stage2_max_context_frames = int(temporal.shape[0])
++
++        elif "transformer" in payload:
++            transformer = payload["transformer"]
++            if not isinstance(transformer, dict):
++                raise TypeError(f"{checkpoint}: transformer must be a state_dict")
++            source = str(payload.get("source", payload.get("method", "gep-ar")))
++
++            # The old Event-JEPA export intentionally contained only the GEP
++            # transformer core and therefore cannot reproduce Event-JEPA's
++            # encoder semantics.  Require the raw checkpoint for this test.
++            if source == "event_jepa":
++                raise ValueError(
++                    "Use the raw Event-JEPA checkpoint for segmentation, not "
++                    "gep_transformer.pt; the legacy export omits temporal_embed."
++                )
++            self.seg_stage2_has_temporal_embed = False
++            self.seg_stage2_max_context_frames = 0
++        else:
+             raise KeyError(
+-                f"{checkpoint}: missing transformer state_dict"
++                f"{checkpoint}: expected either online_encoder or transformer"
+             )
+ 
+-        # Infer the exported architecture directly from the state dict.
+         pos_weight = transformer.get("pos_embed.weight")
+         if pos_weight is None:
+-            raise KeyError(
+-                f"{checkpoint}: transformer missing pos_embed.weight"
+-            )
++            raise KeyError(f"{checkpoint}: missing pos_embed.weight")
+ 
+         exported_window, exported_dim = pos_weight.shape
+-
+         if int(exported_dim) != int(self.n_embed):
+             raise ValueError(
+                 f"Transformer dim mismatch: checkpoint={exported_dim}, "
+@@ -433,25 +469,39 @@
+                 parts = key.split(".")
+                 if len(parts) > 1 and parts[1].isdigit():
+                     block_ids.append(int(parts[1]))
+-
+         if not block_ids:
+-            raise KeyError(
+-                f"{checkpoint}: cannot infer Transformer blocks"
+-            )
++            raise KeyError(f"{checkpoint}: cannot infer Transformer blocks")
+ 
+-        exported_layers = max(block_ids) + 1
++        # n_tokens is the number of *spatial* patch positions actually used
++        # during Stage-2 pretraining.  For the current formal V1 runs it is 256.
++        spatial_tokens = int(cfg.get("n_tokens", 256))
++        side = int(math.isqrt(spatial_tokens))
++        if side * side != spatial_tokens:
++            raise ValueError(
++                f"Stage-2 spatial token count must form a square grid; "
++                f"got n_tokens={spatial_tokens}"
++            )
++        if spatial_tokens > int(exported_window):
++            raise ValueError(
++                f"n_tokens={spatial_tokens} exceeds pos_embed size={exported_window}"
++            )
+ 
+         self.window_size = int(exported_window)
+-        self.n_layer = int(exported_layers)
++        self.n_layer = max(block_ids) + 1
+         self.transformer_weight = transformer
++        self.seg_stage2_source = source
++        self.seg_stage2_pretrain_spatial_tokens = spatial_tokens
++        self.seg_stage2_pretrain_grid = (side, side)
+ 
+-        source = payload.get("source", "gep-ar")
+         print(
+             "SEG Stage-2 loaded:"
+             f" source={source},"
+             f" layers={self.n_layer},"
+             f" dim={self.n_embed},"
+             f" window={self.window_size},"
++            f" spatial_tokens={spatial_tokens},"
++            f" spatial_grid={side}x{side},"
++            f" temporal_embed={self.seg_stage2_has_temporal_embed},"
+             f" checkpoint={checkpoint}"
+         )
+ 
+--- src/seg.py
++++ src/seg.py
+@@ -445,14 +445,26 @@
+             print("*" * 50 + " dim_proj loaded")
+ 
+         if hasattr(config, "transformer_weight"):
+-            self.transformer = nn.ModuleDict(dict(
+-                modality_embed = nn.Embedding(5, config.n_embed),
+-                pos_embed = nn.Embedding(config.window_size, config.n_embed),
+-                blocks = nn.ModuleList([Block(config) for _ in range(self.config.n_layer)]),
+-                norm = nn.LayerNorm(config.n_embed),
+-            ))
++            transformer_modules = dict(
++                modality_embed=nn.Embedding(5, config.n_embed),
++                pos_embed=nn.Embedding(config.window_size, config.n_embed),
++                blocks=nn.ModuleList(
++                    [Block(config) for _ in range(self.config.n_layer)]
++                ),
++                norm=nn.LayerNorm(config.n_embed),
++            )
++            if getattr(config, "seg_stage2_has_temporal_embed", False):
++                transformer_modules["temporal_embed"] = nn.Embedding(
++                    int(config.seg_stage2_max_context_frames),
++                    config.n_embed,
++                )
++
++            self.transformer = nn.ModuleDict(transformer_modules)
+             if config.transformer_weight is not None:
+-                self.transformer.load_state_dict(config.transformer_weight, strict=True)
++                self.transformer.load_state_dict(
++                    config.transformer_weight,
++                    strict=True,
++                )
+                 print("*" * 50 + " transformer loaded")
+             else:
+                 print("*" * 50 + " transformer random initialized")
+@@ -719,28 +731,80 @@
+                 return tokens
+     
+     def forward_transformer(self, x):
++        """Apply the Stage-2 encoder with a resolution-aware spatial adapter.
++
++        Stage-2 pretraining learned spatial position embeddings on a 16x16
++        patch grid (256 positions).  DSEC segmentation uses a 32x46 grid.
++        We therefore interpolate only the learned spatial prefix instead of
++        treating pos_embed[256:1472] as spatial positions.
++
++        For Event-JEPA, a single-frame downstream sample corresponds to
++        temporal slot 0, so temporal_embed[0] is retained as in pretraining.
++        """
+         B, T, C = x.shape
+-        ids = torch.ones(B, T, dtype=torch.int64, device=x.device) * 2  # 1 for image, 2 for event
++        ids = torch.full(
++            (B, T),
++            2,
++            dtype=torch.int64,
++            device=x.device,
++        )
+         modality_emb = self.transformer.modality_embed(ids)
+-        
+-        # Interpolate positional embeddings if resolution changes (e.g. during TTA)
++
+         H_grid = self._encoder_hw[0] // self.config.P
+         W_grid = self._encoder_hw[1] // self.config.P
+-        H_orig = self.config.H // self.config.P
+-        W_orig = self.config.W // self.config.P
++        if H_grid * W_grid != T:
++            raise RuntimeError(
++                f"token/grid mismatch: tokens={T}, grid={H_grid}x{W_grid}"
++            )
+ 
+-        if (H_grid != H_orig or W_grid != W_orig) and (H_grid * W_grid == T):
+-            N_orig = H_orig * W_orig
+-            pos_weight = self.transformer.pos_embed.weight[:N_orig]
+-            pos_weight = pos_weight.transpose(0, 1).reshape(1, C, H_orig, W_orig)
+-            pos_emb = F.interpolate(pos_weight, size=(H_grid, W_grid), mode='bicubic', align_corners=False)
+-            pos_emb = pos_emb.flatten(2).transpose(1, 2).squeeze(0)
+-        else:
+-            pos = torch.arange(0, T, dtype=torch.long, device=x.device).clamp(max=self.config.window_size - 1)
+-            pos_emb = self.transformer.pos_embed(pos)
++        base_tokens = int(
++            getattr(
++                self.config,
++                "seg_stage2_pretrain_spatial_tokens",
++                T,
++            )
++        )
++        base_h, base_w = getattr(
++            self.config,
++            "seg_stage2_pretrain_grid",
++            (H_grid, W_grid),
++        )
++        base_h, base_w = int(base_h), int(base_w)
++
++        if base_h * base_w != base_tokens:
++            raise RuntimeError(
++                f"invalid Stage-2 base grid {base_h}x{base_w} "
++                f"for {base_tokens} tokens"
++            )
++
++        # IMPORTANT: only the first base_tokens rows were trained as spatial
++        # patch positions.  Remaining rows in a 4096-entry table are not extra
++        # high-resolution spatial positions.
++        pos_weight = self.transformer.pos_embed.weight[:base_tokens]
++        pos_weight = (
++            pos_weight.transpose(0, 1)
++            .reshape(1, C, base_h, base_w)
++        )
++        if (H_grid, W_grid) != (base_h, base_w):
++            pos_weight = F.interpolate(
++                pos_weight,
++                size=(H_grid, W_grid),
++                mode="bicubic",
++                align_corners=False,
++            )
++        pos_emb = pos_weight.flatten(2).transpose(1, 2)
+ 
+         x_ = x + pos_emb + modality_emb
+-        for i, blk in enumerate(self.transformer.blocks):
++
++        # Event-JEPA used a separate temporal embedding during pretraining.
++        # Single-frame semantic segmentation is temporal slot 0.
++        if "temporal_embed" in self.transformer:
++            temporal0 = self.transformer.temporal_embed.weight[0]
++            x_ = x_ + temporal0.view(1, 1, C)
++
++        for blk in self.transformer.blocks:
++            # Event-JEPA is non-causal.  GEP downstream in seg.py is also
++            # intentionally used non-causally; keep that protocol unchanged.
+             x_ = blk(x_)
+         x_ = self.transformer.norm(x_)
+         return x_

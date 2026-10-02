@@ -83,7 +83,7 @@ The pipeline supports multiple datasets. Before running the preprocessing script
 *   **Expected Structure:** Ensure you have the original `caltech-101/101_ObjectCategories` data and the N-Caltech101 event data. The script uses these to pair and convert event streams. Set the `PRE_NCA_DATASET_ROOT` and `PRE_NCA_ORIGINAL_ROOT` environment variables or edit the script directly.
 
 **[DSEC](https://dsec.ifi.uzh.ch/) (`src/pre_dse.py`)**
-*   **Expected Structure:** Typical DSEC structure with split folders (e.g., `train`, `test`) containing sequence directories (like `interlaken_00_c/`).
+*   **Expected Structure:** DSEC's modality archives extracted into `<root>/<split>_events`, `<root>/<split>_images`, and `<root>/<split>_calibration`. Semantic labels are optional for token generation.
 
 **[MVSEC](https://daniilidis-group.github.io/mvsec/) (`src/pre_mvs.py`)**
 *   **Expected Structure:** Download the standard sequences (`outdoor_day1`, `outdoor_day2`, `outdoor_night1`, `outdoor_night2`, `outdoor_night3`). The script expects HDF5 format data (`*_data.hdf5` and `*_gt.hdf5`). Edit the `DATASETS` dictionary inside `src/pre_mvs.py` to point to your HDF5 files.
@@ -127,13 +127,21 @@ Once you have an aligned event encoder from Stage 1, you need to extract and sav
 
 Some scripts have a dedicated tokenization function enabled inside the script. You will need to load your Stage 1 checkpoint inside the preprocessing script to extract the features:
 ```bash
-# Example for DSEC: modify src/pre_dse.py to load your Stage-1 checkpoint, then run:
+# DSEC event-only example: one training sequence and one Stage-1 checkpoint.
 PYTHONPATH=src python src/pre_dse.py \
   --root /path/to/DSEC \
+  --split train \
+  --sequence zurich_city_00_a \
+  --event-encoder-ckpt /path/to/gep_stage1_small.pt \
+  --prepare-pairs \
+  --event-only \
   --device cuda:0 \
-  --workers 8
+  --workers 1
 ```
-*This will create `eventToken` and `imageToken` directories containing `.pt` files.*
+This creates `eventToken/*.pt` only. Omit `--event-only` and provide
+`--image-encoder-ckpt` to create paired `eventToken` and `imageToken` files.
+See the [Chinese runbook](docs/event_jepa_runbook.md) for the exact directory
+tree, local paths, verification commands, and restart behavior.
 
 ### Stage 2: Generative Pre-training
 With the tokens saved to disk, you can run the generative pre-training (e.g., GPT-style masked modeling/next token prediction). Modify the `GPTConfig` class inside `src/config.py` to point to the saved tokens.

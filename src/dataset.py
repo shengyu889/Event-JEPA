@@ -406,12 +406,16 @@ class DSECSegmentDataset(Dataset):
         return input, label
 
 class DSECSegmentSequenceDataset(Dataset):
-    """
-    DSEC segmentation dataset that returns consecutive event frames with a label.
+    """DSEC segmentation dataset with causal event-frame history.
 
-    Each item yields a two-frame tensor: index 0 is the current event frame, index 1
-    is the next event frame in the sequence. The segmentation label corresponds to
-    the current frame.
+    Each sample returns ``frames`` with shape ``[T, C, H, W]`` after the
+    optional transform.  The sequence is strictly history/current only:
+
+        [t-(T-1), ..., t-1, t] -> semantic label at t
+
+    Samples never cross sequence boundaries and never use future frames.  Past
+    event frames do not need semantic labels; only the current frame ``t`` must
+    have a label.
     """
 
     def __init__(
@@ -419,61 +423,84 @@ class DSECSegmentSequenceDataset(Dataset):
         root_dir: str,
         split: str = "train",
         C: int = 11,
-        frames_per_sample: int = 2,
+        frames_per_sample: int = 4,
         transform=None,
     ):
         super().__init__()
         assert split in ["train", "test"], "split must be either 'train' or 'test'"
-        if frames_per_sample != 2:
-            raise ValueError("frames_per_sample must be 2 (current + next event)")
+        if frames_per_sample < 1:
+            raise ValueError("frames_per_sample must be >= 1")
 
         self.transform = transform
-        self.frames_per_sample = frames_per_sample
-        self.modalities = ("event", "event")
+        self.frames_per_sample = int(frames_per_sample)
+        self.modalities = tuple("event" for _ in range(self.frames_per_sample))
 
-        self.event_curr_paths: List[str] = []
-        self.event_next_paths: List[str] = []
+        self.frame_paths: List[List[str]] = []
         self.label_paths: List[str] = []
+        self.sequence_names: List[str] = []
+        self.current_keys: List[str] = []
 
-        input_root = os.path.join(root_dir, f"{split}_images")
-        seman_root = os.path.join(root_dir, f"{split}_semantic_segmentation/{split}")
+        input_root = Path(root_dir) / f"{split}_images"
+        seman_root = Path(root_dir) / f"{split}_semantic_segmentation" / split
 
-        for subfolder in sorted(os.listdir(seman_root)):
-            event_dir = os.path.join(input_root, subfolder, "images", "left", "eventImage")
-            label_dir = os.path.join(seman_root, subfolder, f"{C}classes_renamed")
+        if not input_root.exists():
+            raise FileNotFoundError(f"Missing DSEC image split: {input_root}")
+        if not seman_root.exists():
+            raise FileNotFoundError(f"Missing DSEC semantic split: {seman_root}")
 
-            event_files = glob.glob(os.path.join(event_dir, "*.png"))
-            label_files = glob.glob(os.path.join(label_dir, "*.png"))
+        def timestamp_key(path: Path):
+            try:
+                return (0, int(path.stem))
+            except ValueError:
+                return (1, path.stem)
 
+        for sequence_dir in sorted(p for p in seman_root.iterdir() if p.is_dir()):
+            sequence = sequence_dir.name
+            event_dir = input_root / sequence / "images" / "left" / "eventImage"
+            label_dir = sequence_dir / f"{C}classes_renamed"
+
+            if not event_dir.exists() or not label_dir.exists():
+                continue
+
+            event_files = sorted(event_dir.glob("*.png"), key=timestamp_key)
+            label_files = sorted(label_dir.glob("*.png"), key=timestamp_key)
             if not event_files or not label_files:
                 continue
 
-            event_map = {Path(path).stem: path for path in event_files}
-            label_map = {Path(path).stem: path for path in label_files}
+            event_index = {path.stem: idx for idx, path in enumerate(event_files)}
 
-            common_keys = sorted(set(event_map) & set(label_map))
-            if len(common_keys) < 2:
-                continue
+            for label_path in label_files:
+                current_idx = event_index.get(label_path.stem)
+                if current_idx is None:
+                    continue
 
-            for idx in range(len(common_keys) - 1):
-                curr_key = common_keys[idx]
-                next_key = common_keys[idx + 1]
-                self.event_curr_paths.append(event_map[curr_key])
-                self.event_next_paths.append(event_map[next_key])
-                self.label_paths.append(label_map[curr_key])
+                history_start = current_idx - self.frames_per_sample + 1
+                if history_start < 0:
+                    # Not enough past context inside this sequence.
+                    continue
 
-        if len(self.label_paths) == 0:
-            raise RuntimeError(f"No paired samples found in {root_dir} for split '{split}'")
+                history = event_files[history_start : current_idx + 1]
+                if len(history) != self.frames_per_sample:
+                    continue
+
+                self.frame_paths.append([str(path) for path in history])
+                self.label_paths.append(str(label_path))
+                self.sequence_names.append(sequence)
+                self.current_keys.append(label_path.stem)
+
+        if not self.label_paths:
+            raise RuntimeError(
+                f"No causal {self.frames_per_sample}-frame DSEC segmentation samples "
+                f"found under {root_dir} for split '{split}'"
+            )
 
     def __len__(self):
         return len(self.label_paths)
 
     def __getitem__(self, idx: int):
-        event_curr = Image.open(self.event_curr_paths[idx])
-        event_next = Image.open(self.event_next_paths[idx])
+        frames = [Image.open(path) for path in self.frame_paths[idx]]
         label = Image.open(self.label_paths[idx])
 
-        frames = [event_curr, event_next]
         if self.transform is not None:
             frames, label = self.transform(frames, label)
         else:
@@ -483,6 +510,7 @@ class DSECSegmentSequenceDataset(Dataset):
             ]
             frames = torch.stack(frames, dim=0)
             label = torch.tensor(np.array(label), dtype=torch.int64)
+
         return frames, label
 
 class DSECECDDPEventDataset(Dataset):

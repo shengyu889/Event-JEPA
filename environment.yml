@@ -21,6 +21,8 @@ dependencies:
       - scikit-learn
       - rosbags==0.11.0
       - tqdm
-      - numpy
+      - numpy<2.3
+      - numba==0.61.2
+      - opencv-python-headless==4.11.0.86
       - pytest==8.3.5
       - pyyaml==6.0.2

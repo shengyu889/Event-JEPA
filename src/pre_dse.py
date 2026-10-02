@@ -1,6 +1,6 @@
-import argparse
 import sys
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 sys.path.append("dinov2")
 sys.path.append("segmentation")
@@ -20,6 +20,12 @@ from PIL import Image
 from utils import EventSlicer
 from dinov2.models.vision_transformer import vit_small
 from dataset import PadToMinSide, PairedProcessor, Normalize, RandomCrop, RandomHorizontalFlip, RandomSwapEventRedBlue, ResizeKeepRatio, ToTensor, CenterCrop
+from pre_dse_cli import (
+    build_parser,
+    load_encoder_state_dict,
+    prepare_token_jobs,
+    run_from_args,
+)
 from utils import accumulate_to_rgb
 
 def _compute_stats_for_subfolder(image_root: str, subfolder: str):
@@ -371,7 +377,37 @@ class Processor():
             print(f"Saved stats to {save_to}")
 
     @torch.no_grad()
-    def process_tokens(self, subfolders=None, workers: int = 1):
+    def _load_vit_small(self, checkpoint_path: Path, checkpoint_key: str):
+        checkpoint = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+        encoder = vit_small(
+            patch_size=14,
+            img_size=518,
+            block_chunks=0,
+            init_values=1e-6,
+        )
+        load_encoder_state_dict(encoder, checkpoint, checkpoint_key)
+        encoder.to(self.device)
+        encoder.eval()
+        return encoder
+
+    @torch.no_grad()
+    def process_tokens(
+        self,
+        subfolders=None,
+        workers: int = 1,
+        event_encoder_ckpt: Path | None = None,
+        image_encoder_ckpt: Path | None = None,
+        event_only: bool = False,
+    ):
+        if event_encoder_ckpt is None:
+            raise ValueError("event_encoder_ckpt is required")
+        if not event_only and image_encoder_ckpt is None:
+            raise ValueError("image_encoder_ckpt is required unless event_only=True")
+
         self.train_preprocessor     = PairedProcessor([
                                             ToTensor(type=self.type),
                                             Normalize(self.DSEC_ME, self.DSEC_SE, self.DSEC_MI, self.DSEC_SI, type=self.type),
@@ -386,67 +422,62 @@ class Processor():
                                                     PadToMinSide(target=(self.DSEC_H, self.DSEC_W), pad_x1=0, pad_x2=0),
                                                     CenterCrop((self.DSEC_H, self.DSEC_W)),
                                                     ])
-        self.image_encoder = vit_small(patch_size=14, img_size=518, block_chunks=0, init_values=1e-6).to(self.device)
-        self.event_encoder = vit_small(patch_size=14, img_size=518, block_chunks=0, init_values=1e-6).to(self.device)
-        self.image_encoder.load_state_dict(torch.load("/data/storage/jianwen/cache/dinov2/dinov2_vits14_pretrain.pth", weights_only=True), strict=True)
-        # self.event_encoder.load_state_dict(torch.load("/data/storage/jianwen/cache/dinov2/dinov2_vits14_pretrain.pth", weights_only=True), strict=True)
-        self.event_encoder.load_state_dict(torch.load("/data/storage/jianwen/cache/ckpt_matters/gra_mixture_16x.pt", weights_only=True)["event_encoder"], strict=True)
-        self.image_encoder.eval()
-        self.event_encoder.eval()
+        self.event_encoder = self._load_vit_small(
+            Path(event_encoder_ckpt),
+            "event_encoder",
+        )
+        self.image_encoder = None
+        if not event_only:
+            self.image_encoder = self._load_vit_small(
+                Path(image_encoder_ckpt),
+                "image_encoder",
+            )
 
         for subfolder in sorted(os.listdir(self.image_root)):
             if subfolders is not None and subfolder not in subfolders:
                 continue
             print("---------------------------------- merging tokens in folder:", subfolder)
-            save_root = os.path.join(self.image_root, subfolder, "images", "left")
-            eventToken_dir = os.path.join(save_root, "eventToken")
-            imageToken_dir = os.path.join(save_root, "imageToken")
-            warpped_dir = os.path.join(save_root, "warpped")
-            eventImage_dir = os.path.join(save_root, "eventImage")
-            print("removing to have a clean start")
-            shutil.rmtree(eventToken_dir, ignore_errors=True)
-            shutil.rmtree(imageToken_dir, ignore_errors=True)
-            os.makedirs(eventToken_dir, exist_ok=True)
-            os.makedirs(imageToken_dir, exist_ok=True)
+            save_root = Path(self.image_root) / subfolder / "images" / "left"
+            jobs = prepare_token_jobs(save_root, event_only=event_only)
+            print(f"event tokens will be saved in: {save_root / 'eventToken'}")
+            if not event_only:
+                print(f"image tokens will be saved in: {save_root / 'imageToken'}")
 
-            names = sorted(os.listdir(warpped_dir))
-
-            def _process_one(name: str):
-                timestamp = name.split(".")[0]
-                warped = Image.open(os.path.join(warpped_dir, name))
-                event_rgb = Image.open(os.path.join(eventImage_dir, name))
+            def _process_one(job):
+                event_rgb = Image.open(job.event_input).convert("RGB")
+                warped = (
+                    None
+                    if job.image_input is None
+                    else Image.open(job.image_input).convert("RGB")
+                )
 
                 if self.split == "train":
                     event_rgb_t, warped_t = self.train_preprocessor(event_rgb, warped)
                 else:
                     event_rgb_t, warped_t = self.valid_preprocessor(event_rgb, warped)
 
-                image_tokens = self.image_encoder.forward_features(warped_t.unsqueeze(0).to(self.device))["x_norm_patchtokens"].squeeze(0).cpu()
                 event_tokens = self.event_encoder.forward_features(event_rgb_t.unsqueeze(0).to(self.device))["x_norm_patchtokens"].squeeze(0).cpu()
-                torch.save(image_tokens, os.path.join(imageToken_dir, f"{timestamp}.pt"))
-                torch.save(event_tokens, os.path.join(eventToken_dir, f"{timestamp}.pt"))
+                torch.save(event_tokens, job.event_output)
+
+                if not event_only:
+                    image_tokens = self.image_encoder.forward_features(warped_t.unsqueeze(0).to(self.device))["x_norm_patchtokens"].squeeze(0).cpu()
+                    torch.save(image_tokens, job.image_output)
 
             if workers is None or workers <= 1:
-                for name in tqdm(names):
-                    _process_one(name)
+                for job in tqdm(jobs):
+                    _process_one(job)
             else:
                 with ThreadPoolExecutor(max_workers=workers) as ex:
-                    list(tqdm(ex.map(_process_one, names), total=len(names)))
+                    list(tqdm(ex.map(_process_one, jobs), total=len(jobs)))
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return run_from_args(args, Processor)
+    except (FileNotFoundError, ValueError) as error:
+        parser.error(str(error))
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="/data/storage/jianwen/DSEC", type=str)
-    parser.add_argument("--device", default="cuda:3", type=str)
-    parser.add_argument("--workers", default=1, type=int, help="number of parallel processes for run()")
-    parser.add_argument("--stats_out", default=None, type=str, help="optional path to save stats as YAML")
-    args = parser.parse_args()
-
-    for split in ["train", "test"]:
-        args.split = split
-
-        processor = Processor(args)
-        subfolders = os.listdir(processor.sementatic_root)
-        # processor.run(n_workers=args.workers)
-        processor.process_tokens(workers=args.workers)
-        # processor.compute_rgb_stats(save_to=args.stats_out, workers=args.workers)
-
+    main()
