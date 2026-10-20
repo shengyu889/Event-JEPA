@@ -47,18 +47,10 @@ from tqdm import tqdm
 from dinov2.models.vision_transformer import vit_small, vit_base
 from model import Block, Transformer
 from utils import IOU, PixelAccuracy, get_lr, get_param_groups, multiclass_ce_loss, multiclass_dice_loss
-try:
-    from mem import MEMEncoderConfig, MemEncoder
-except ImportError:  # fall back to local src/mem.py when package name clashes
-    _mem_spec = importlib.util.spec_from_file_location(
-        "seg_mem_module", Path(__file__).resolve().with_name("mem.py")
-    )
-    _mem_module = importlib.util.module_from_spec(_mem_spec)
-    assert _mem_spec and _mem_spec.loader
-    sys.modules[_mem_spec.name] = _mem_module
-    _mem_spec.loader.exec_module(_mem_module)
-    MEMEncoderConfig = _mem_module.MEMEncoderConfig
-    MemEncoder = _mem_module.MemEncoder
+# MEM is an optional baseline dependency.
+# Do NOT import it for GEP / Event-JEPA experiments.
+MEMEncoderConfig = None
+MemEncoder = None
 
 # ECDDP is an optional baseline dependency.
 # Import it lazily only when encoder_mode == "ecddp".
@@ -347,6 +339,12 @@ class SEG(Transformer):
         self.encoder_mode = encoder_mode
         self.is_ecddp = self.encoder_mode == "ecddp"
         if self.encoder_mode == "mem":
+            raise RuntimeError(
+                "MEM baseline is disabled in the Event-JEPA "
+                "downstream path. Configure the external MEM "
+                "package explicitly before running encoder_mode='mem'."
+            )
+
             mem_cfg = MEMEncoderConfig(
                 ckpt_path=self.config.event_encoder_weight,
                 image_size=getattr(self.config, "mem_image_size", (self.config.H, self.config.W)),
@@ -559,6 +557,74 @@ class SEG(Transformer):
         self._loss_components: dict[str, float] = {}
         self._encoder_hw: Tuple[int, int] = (self.config.H, self.config.W)
         
+        # --------------------------------------------------
+        # Formal transfer protocol.
+        #
+        # GEP Stage-1 is ALWAYS frozen in Event-JEPA
+        # downstream experiments.
+        #
+        # frozen: Stage-1 frozen + Stage-2 frozen
+        # ft10/full: Stage-1 frozen + Stage-2 trainable
+        # --------------------------------------------------
+        protocol = getattr(
+            self.config,
+            "transfer_protocol",
+            "full",
+        )
+
+        self.event_encoder.requires_grad_(False)
+
+        if hasattr(self, "dim_proj"):
+            self.dim_proj.requires_grad_(False)
+
+        if hasattr(self, "token_proj"):
+            self.token_proj.requires_grad_(False)
+
+        if protocol == "frozen":
+            self.transformer.requires_grad_(False)
+        elif protocol in {"ft10", "full"}:
+            self.transformer.requires_grad_(True)
+        else:
+            raise ValueError(
+                f"unsupported transfer protocol: {protocol}"
+            )
+
+        stage1_trainable = sum(
+            p.numel()
+            for p in self.event_encoder.parameters()
+            if p.requires_grad
+        )
+
+        stage2_trainable = sum(
+            p.numel()
+            for p in self.transformer.parameters()
+            if p.requires_grad
+        )
+
+        print("=" * 72)
+        print("SEG TRANSFER PROTOCOL")
+        print("=" * 72)
+        print("protocol          :", protocol)
+        print("GEP Stage-1       : FROZEN")
+        print(
+            "Stage-1 trainable :",
+            stage1_trainable,
+        )
+        print(
+            "Stage-2 trainable :",
+            stage2_trainable,
+        )
+
+        if protocol == "frozen":
+            if stage1_trainable != 0:
+                raise RuntimeError(
+                    "Stage-1 is not frozen"
+                )
+            if stage2_trainable != 0:
+                raise RuntimeError(
+                    "Stage-2 is not frozen"
+                )
+
         # training related
         self.train_dataloader       = torch.utils.data.DataLoader(self.config.train_dataset, batch_size=self.config.batch_size, shuffle=True, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)
         self.valid_dataloader       = torch.utils.data.DataLoader(self.config.valid_dataset, batch_size=self.config.batch_size, shuffle=False, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)
@@ -1154,11 +1220,17 @@ class SEG(Transformer):
 
         accum_steps = getattr(self.config, "grad_accum_steps", 1)
 
+        lr_schedule_steps = getattr(
+            self.config,
+            "lr_schedule_steps",
+            self.config.steps,
+        )
+
         current_lr = get_lr(
             global_step,
             self.config.warmup_steps,
             self.config.lr,
-            self.config.steps,
+            lr_schedule_steps,
             self.config.min_lr,
         )
         for param_group in self.optimizer.param_groups:
@@ -1246,12 +1318,30 @@ class SEG(Transformer):
                 f"got {run_steps}"
             )
 
+        lr_schedule_steps = int(
+            os.environ.get(
+                "SEG_LR_SCHEDULE_STEPS",
+                self.config.steps,
+            )
+        )
+
+        if lr_schedule_steps < run_steps:
+            raise ValueError(
+                "SEG_LR_SCHEDULE_STEPS must be >= "
+                f"SEG_MAX_STEPS, got "
+                f"{lr_schedule_steps} < {run_steps}"
+            )
+
+        self.config.lr_schedule_steps = (
+            lr_schedule_steps
+        )
+
         print(
             f"micro batch: {self.config.batch_size}, "
             f"grad accum: {accum_steps}, "
             f"effective batch: {self.config.batch_size * accum_steps}, "
             f"run steps: {run_steps}, "
-            f"lr schedule steps: {self.config.steps}"
+            f"lr schedule steps: {lr_schedule_steps}"
         )
 
         self.optimizer.zero_grad(set_to_none=True)

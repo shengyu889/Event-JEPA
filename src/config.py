@@ -185,11 +185,89 @@ class SegConfig(Config):
             )
         )
 
+        self.transfer_protocol = os.environ.get(
+            "SEG_TRANSFER_PROTOCOL",
+            "full",
+        ).strip().lower()
+
+        if self.transfer_protocol not in {
+            "frozen",
+            "ft10",
+            "full",
+        }:
+            raise ValueError(
+                "SEG_TRANSFER_PROTOCOL must be "
+                "frozen, ft10, or full"
+            )
+
         self._load_seg_transformer_from_env()
         self._configure_temporal_segmentation()
         self._init_palette()
         self._build_preprocessors()
         self._build_datasets()
+
+        # --------------------------------------------------
+        # Formal B protocol:
+        # deterministic 10%-label subset, stratified
+        # by DSEC sequence when sequence metadata exists.
+        # --------------------------------------------------
+        if self.transfer_protocol == "ft10":
+            base = self.train_dataset
+            g = torch.Generator()
+            g.manual_seed(0)
+
+            if hasattr(base, "sequence_names"):
+                groups = {}
+                for i, seq in enumerate(base.sequence_names):
+                    groups.setdefault(seq, []).append(i)
+
+                chosen = []
+
+                for seq in sorted(groups):
+                    ids = groups[seq]
+                    perm = torch.randperm(
+                        len(ids),
+                        generator=g,
+                    ).tolist()
+
+                    k = max(
+                        1,
+                        int(round(0.10 * len(ids))),
+                    )
+
+                    chosen.extend(
+                        ids[j]
+                        for j in perm[:k]
+                    )
+
+                chosen = sorted(chosen)
+
+            else:
+                perm = torch.randperm(
+                    len(base),
+                    generator=g,
+                ).tolist()
+
+                k = max(
+                    1,
+                    int(round(0.10 * len(base))),
+                )
+
+                chosen = sorted(perm[:k])
+
+            self.train_dataset = (
+                torch.utils.data.Subset(
+                    base,
+                    chosen,
+                )
+            )
+
+            print(
+                "SEG ft10 subset:",
+                len(self.train_dataset),
+                "/",
+                len(base),
+            )
 
         print(f"train dataset size: {len(self.train_dataset)}")
         print(f"valid dataset size: {len(self.valid_dataset)}")
@@ -206,7 +284,10 @@ class SegConfig(Config):
         self.eval_only = False
         # self.eval_checkpoint = "/data/storage/jianwen/cache/ckpts/2025-11-14-02:04_seg/epoch8000_0.8904.pt"
         self.eval_checkpoint = None
-        self.manual_encoder_weight_path = "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt"
+        self.manual_encoder_weight_path = os.environ.get(
+            "GEP_STAGE1_CKPT",
+            "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt",
+        )
 
         self.vit = "small"
         self.vit_backbone = "dinov2"  # ["dinov2", "dinov3"]
@@ -258,7 +339,12 @@ class SegConfig(Config):
             self.ME, self.SE, self.MI, self.SI = self.DD17_ME, self.DD17_SE, self.DD17_MI, self.DD17_SI
             self.steps = 4000
         self.log_every = self.steps // 100
-        self.valid_every = self.steps // 10
+        self.valid_every = int(
+            os.environ.get(
+                "SEG_VALID_EVERY",
+                self.steps // 10,
+            )
+        )
 
     def _init_mem_defaults(self):
         self.mem_image_size = (448, 640)
@@ -334,7 +420,10 @@ class SegConfig(Config):
                     self.P = 32
                     self.n_embed = 768
             else:
-                encoder_weight = "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt"
+                encoder_weight = os.environ.get(
+                    "GEP_STAGE1_CKPT",
+                    "/home/tom/event-jepa/checkpoints/gep_stage1_small.pt",
+                )
                 # transformer_weight = None
 
                 if 'encoder_weight' in locals() and encoder_weight is not None:
@@ -736,7 +825,10 @@ class SegConfig(Config):
 
     def _build_datasets(self):
         if self.dataset == "dsec":
-            dsec_root = "/home/tom/event-jepa/datasets/DSEC"
+            dsec_root = os.environ.get(
+                "DSEC_ROOT",
+                "/home/tom/event-jepa/datasets/DSEC",
+            )
             if self.encoder_mode == "ecddp":
                 self.train_dataset = DSECECDDPEventDataset(
                     root_dir=dsec_root,

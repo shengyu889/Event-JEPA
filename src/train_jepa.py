@@ -73,11 +73,16 @@ def build_model(config: EventJEPAConfig) -> EventJEPA:
 def _dataset(config: EventJEPAConfig, split: str):
     packed_root = config.data_root / "packed"
 
-    packed_available = (
-        (packed_root / "train_tokens.npy").is_file()
-        and (packed_root / "train_timestamps.npy").is_file()
-        and (packed_root / "val_tokens.npy").is_file()
-        and (packed_root / "val_timestamps.npy").is_file()
+    packed_available = all(
+        (packed_root / name).is_file()
+        for name in (
+            "train_tokens.npy",
+            "train_timestamps.npy",
+            "train_window_starts.npy",
+            "val_tokens.npy",
+            "val_timestamps.npy",
+            "val_window_starts.npy",
+        )
     )
 
     if packed_available:
@@ -167,6 +172,10 @@ def build_loaders(config: EventJEPAConfig, rank: int, world_size: int):
         "drop_last": False,
         "generator": generator,
     }
+
+    if config.num_workers > 0:
+        common["persistent_workers"] = True
+        common["prefetch_factor"] = 2
     train_loader = DataLoader(
         train_dataset,
         shuffle=train_sampler is None,
@@ -324,6 +333,7 @@ def run_training(
                         "residual_loss",
                         "order_loss",
                         "order_gap",
+                        "representation_std",
                         "mean_cosine",
                     ):
                         if key in metrics:
@@ -352,6 +362,16 @@ def run_training(
                         device,
                         config.precision,
                     )
+
+                    print(
+                        "[VALID] "
+                        + " ".join(
+                            f"{key}={value:.6f}"
+                            for key, value in validation.items()
+                        ),
+                        flush=True,
+                    )
+
                     for key, value in validation.items():
                         if writer is not None:
                             writer.add_scalar(f"valid/{key}", value, step)

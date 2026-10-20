@@ -28,3 +28,7 @@ wandb/
 # Local backup/generated files
 *.before_*
 src/vis_*.png
+
+
+# Local source backups
+*.bak*

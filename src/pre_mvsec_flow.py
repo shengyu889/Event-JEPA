@@ -460,7 +460,7 @@ def process_sequence(
 ):
     data_path = (
         root
-        / "raw"
+        / "raw/outdoor_day"
         / f"{sequence}_data.hdf5"
     )
 

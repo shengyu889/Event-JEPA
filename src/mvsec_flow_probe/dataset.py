@@ -46,7 +46,12 @@ class MVSECFlowProbeDataset(Dataset):
             / "processed"
             / self.sequence
         )
-
+        #depth
+        # self.token_dir = (
+        #     self.sequence_root
+        #     / "eventToken_vits14"
+        # )
+        #flow
         self.token_dir = (
             self.sequence_root
             / "eventToken"

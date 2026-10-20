@@ -42,7 +42,7 @@ from torchinfo import summary
 from tqdm import tqdm
 
 from torchvision.models import swin_t, Swin_T_Weights
-from dinov2.models.vision_transformer import vit_large, vit_small, vit_base, vit_small_plus
+from dinov2.models.vision_transformer import vit_large, vit_small, vit_base
 from model import Transformer
 from utils import get_lr, get_param_groups, info_nce_loss, kl_loss
 from model import Block
@@ -90,7 +90,7 @@ class ProjectedEncoder(nn.Module):
             return getattr(self.encoder, name)
 
 class Gra(Transformer):
-    def __init__(self, config):
+    def __init__(self, config, build_training_state=True):
         super().__init__(config)
         self.config = config
         vit_backbone = getattr(config, "vit_backbone", "dinov2")
@@ -138,13 +138,6 @@ class Gra(Transformer):
             else:
                 if config.vit == "small":
                     self.event_encoder = vit_small(patch_size=14, img_size=518, block_chunks=0, init_values=1e-6, num_register_tokens=4, in_chans=in_chans)
-                elif config.vit == "small+":
-                    self.event_encoder = vit_small_plus(patch_size=14, img_size=518, block_chunks=0, init_values=1e-6, in_chans=in_chans)
-                    ckpt_path = "/data/storage/jianwen/cache/dinov2/dinov2_vits14_pretrain.pth"
-                    if os.path.exists(ckpt_path):
-                        state_dict = torch.load(ckpt_path, map_location="cpu")
-                        msg = self.event_encoder.load_state_dict(state_dict, strict=False)
-                        print(f"Initialized vit-small+ (first 12 layers) from {ckpt_path}. Missing keys: {len(msg.missing_keys)}")
                 elif config.vit == "large":
                     self.event_encoder = vit_large(patch_size=14, img_size=518, block_chunks=0, init_values=1e-6, num_register_tokens=4, in_chans=in_chans)
                 elif config.vit == "base":
@@ -228,6 +221,11 @@ class Gra(Transformer):
             param.requires_grad = True
         for name, param in self.image_encoder.named_parameters():
             param.requires_grad = False
+
+        # The formal DDP trainer owns DataLoaders / optimizer / AMP / writer.
+        # Keep the original single-GPU training path unchanged by default.
+        if not build_training_state:
+            return
 
         # training related
         self.train_dsec_dataloader       = torch.utils.data.DataLoader(self.config.train_dsec_dataset, batch_size=self.config.batch_size, shuffle=True, num_workers=self.config.n_workers, pin_memory=True, drop_last=False)

@@ -79,6 +79,8 @@ def evaluate(
     abs_sum = 0.0
     abs_count = 0.0
     samples = 0
+    outlier_pixels = 0
+    valid_pixels = 0
 
     for batch in tqdm(
         loader,
@@ -133,6 +135,24 @@ def evaluate(
             * 2.0
         )
 
+        # MVSEC Outlier%: EPE > 3px AND
+        # EPE > 5% of GT flow magnitude.
+        valid = target[:, 2] > 0.5
+        err = torch.linalg.vector_norm(
+            pred.float() - gt.float(), dim=1
+        )
+        gt_mag = torch.linalg.vector_norm(
+            gt.float(), dim=1
+        )
+
+        outlier = (
+            valid
+            & (err > 3.0)
+            & (err > 0.05 * gt_mag)
+        )
+        outlier_pixels += int(outlier.sum().item())
+        valid_pixels += int(valid.sum().item())
+
         metrics.update(
             pred.detach(),
             target,
@@ -166,6 +186,10 @@ def evaluate(
 
         "3pe":
             m["3pe"],
+
+        "outlier_pct":
+            100.0 * outlier_pixels
+            / max(valid_pixels, 1),
 
         "samples":
             samples,

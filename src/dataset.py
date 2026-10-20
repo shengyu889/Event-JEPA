@@ -148,6 +148,168 @@ class NIMAPairedDataset(Dataset):
             event, image = self.transform(event, image)
         return event, image
 
+
+class MVSECPairedDataset(Dataset):
+    """Paired MVSEC dataset for formal Stage-1 alignment.
+
+    Expected layout:
+
+        root_dir/
+        └── outdoor_day2/
+            ├── rgb/
+            │   ├── 000000.png
+            │   └── ...
+            └── eventTensor_ecddp/
+                ├── 000000.pt
+                └── ...
+
+    The event tensor is the formal 20-channel ECDDP-style representation:
+        10 temporal chunks x 2 polarity channels = 20 channels.
+
+    ``pre_mvs_ecddp.py`` currently stores each event sample as:
+        {"tensor": Tensor[20,H,W]}
+
+    Only matching RGB/event stems are used.
+    """
+
+    def __init__(
+        self,
+        root_dir: str,
+        sequences=("outdoor_day2",),
+        transform=None,
+        event_subdir: str = "eventTensor_ecddp",
+        event_channels: int = 20,
+    ):
+        super().__init__()
+
+        if event_channels != 20:
+            raise ValueError(
+                "Formal MVSEC Stage-1 expects event_channels=20, "
+                f"got {event_channels}"
+            )
+
+        self.root_dir = Path(root_dir)
+        self.sequences = tuple(sequences)
+        self.transform = transform
+        self.event_channels = int(event_channels)
+        self.event_subdir = event_subdir
+
+        self.image_names = []
+        self.event_names = []
+        self.sample_sequences = []
+
+        if not self.root_dir.is_dir():
+            raise FileNotFoundError(
+                f"MVSEC root directory not found: {self.root_dir}"
+            )
+
+        for sequence in self.sequences:
+            seq_root = self.root_dir / sequence
+            image_root = seq_root / "rgb"
+            event_root = seq_root / event_subdir
+
+            if not image_root.is_dir():
+                raise FileNotFoundError(
+                    f"MVSEC RGB directory not found: {image_root}"
+                )
+
+            if not event_root.is_dir():
+                raise FileNotFoundError(
+                    f"MVSEC event tensor directory not found: {event_root}"
+                )
+
+            image_map = {
+                path.stem: path
+                for path in sorted(image_root.glob("*.png"))
+            }
+
+            event_map = {
+                path.stem: path
+                for path in sorted(event_root.glob("*.pt"))
+            }
+
+            common = sorted(set(image_map) & set(event_map))
+
+            if not common:
+                raise RuntimeError(
+                    f"No paired RGB / event-tensor samples found for "
+                    f"MVSEC sequence {sequence}"
+                )
+
+            for stem in common:
+                self.image_names.append(str(image_map[stem]))
+                self.event_names.append(str(event_map[stem]))
+                self.sample_sequences.append(sequence)
+
+        if not self.image_names:
+            raise RuntimeError("MVSECPairedDataset is empty")
+
+        if len(self.image_names) != len(self.event_names):
+            raise RuntimeError(
+                "MVSEC image/event pair count mismatch: "
+                f"{len(self.image_names)} vs {len(self.event_names)}"
+            )
+
+    def __len__(self):
+        return len(self.image_names)
+
+    def __getitem__(self, idx: int):
+        event_path = self.event_names[idx]
+        image_path = self.image_names[idx]
+
+        try:
+            event_obj = torch.load(
+                event_path,
+                map_location="cpu",
+                weights_only=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load MVSEC event tensor: {event_path}"
+            ) from exc
+
+        # pre_mvs_ecddp.py stores:
+        #     {"tensor": Tensor[C,H,W]}
+        # while some cached variants may store Tensor directly.
+        if isinstance(event_obj, dict):
+            if "tensor" not in event_obj:
+                raise KeyError(
+                    f"MVSEC tensor file has no 'tensor' field: {event_path}"
+                )
+            event = event_obj["tensor"]
+        else:
+            event = event_obj
+
+        if not isinstance(event, torch.Tensor):
+            raise TypeError(
+                f"Expected torch.Tensor in {event_path}, "
+                f"got {type(event).__name__}"
+            )
+
+        if event.ndim != 3:
+            raise ValueError(
+                f"Expected MVSEC event tensor [C,H,W], "
+                f"got {tuple(event.shape)} from {event_path}"
+            )
+
+        if event.shape[0] != self.event_channels:
+            raise ValueError(
+                f"Expected {self.event_channels} event channels, "
+                f"got {event.shape[0]} from {event_path}"
+            )
+
+        event = event.float().contiguous()
+
+        # MVSEC DAVIS intensity image is often grayscale.
+        # Frozen DINOv2 teacher expects 3-channel input.
+        image = Image.open(image_path).convert("RGB")
+
+        if self.transform is not None:
+            event, image = self.transform(event, image)
+
+        return event, image
+
+
 class BDDPairedDataset(Dataset):
     """Paired BDD dataset reading from `paired/{split}`.
 

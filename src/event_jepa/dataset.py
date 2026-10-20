@@ -76,9 +76,23 @@ class EventJEPADataset(Dataset):
         return token
 
     def _validate_sequence(self, files: list[Path]) -> None:
-        for path in files:
-            self._timestamp(path)
-            self._load_token(path)
+        """
+        Lightweight cache validation.
+
+        Numeric filenames are already validated by the sorting key in
+        __init__. Loading every .pt file here makes dataset construction
+        extremely slow and is redundant because _load_token validates every
+        token again when it is actually sampled.
+
+        We therefore validate only the first and last token of each sequence.
+        """
+        if not files:
+            return
+
+        self._load_token(files[0])
+
+        if len(files) > 1:
+            self._load_token(files[-1])
 
     def __len__(self) -> int:
         return len(self.samples)

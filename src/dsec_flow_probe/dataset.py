@@ -184,7 +184,7 @@ class DSECSequenceFlowDataset(Dataset):
             / sequence
             / "images"
             / "left"
-            / "eventToken"
+            / "eventToken_vits14"
         )
 
         if not forward_dir.is_dir():

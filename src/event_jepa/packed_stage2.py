@@ -9,18 +9,24 @@ from torch.utils.data import Dataset
 
 class PackedStage2Dataset(Dataset):
     """
-    Shared packed temporal dataset for matched Stage-2 training.
+    Sequence-safe mmap Stage-2 dataset.
 
-    One sample always corresponds to exactly 8 consecutive frames:
+    Storage:
+        <root>/packed/
+          train_tokens.npy
+          train_timestamps.npy
+          train_window_starts.npy
 
-        [t-3, t-2, t-1, t, t+1, t+2, t+3, t+4]
+          val_tokens.npy
+          val_timestamps.npy
+          val_window_starts.npy
 
-    Returned tensors:
-        window    : [8, N, D]       -- GEP-AR
-        context   : [4, N, D]       -- Event-JEPA
-        target    : [3, N, D]       -- horizons [1,2,4]
-        delta_t   : [3] seconds
-        timestamps: [8] int64 us
+    A valid sample always contains:
+
+      [t-3,t-2,t-1,t,t+1,t+2,t+3,t+4]
+
+    and window_starts.npy guarantees the 8 frames
+    never cross a sequence boundary.
     """
 
     def __init__(
@@ -29,106 +35,139 @@ class PackedStage2Dataset(Dataset):
         split: str,
         n_tokens: int = 256,
         embed_dim: int = 384,
-    ) -> None:
-        super().__init__()
-
-        if split not in {"train", "val"}:
+    ):
+        if split not in {
+            "train",
+            "val",
+        }:
             raise ValueError(
-                f"split must be train/val, got {split}"
+                split
             )
 
         self.root = Path(root)
         self.split = split
-        self.n_tokens = int(n_tokens)
-        self.embed_dim = int(embed_dim)
 
-        packed = self.root / "packed"
+        self.n_tokens = int(
+            n_tokens
+        )
+
+        self.embed_dim = int(
+            embed_dim
+        )
+
+        packed = (
+            self.root / "packed"
+        )
 
         self.token_path = (
-            packed / f"{split}_tokens.npy"
+            packed
+            / f"{split}_tokens.npy"
         )
+
         self.timestamp_path = (
-            packed / f"{split}_timestamps.npy"
+            packed
+            / f"{split}_timestamps.npy"
         )
 
-        if not self.token_path.is_file():
-            raise FileNotFoundError(
-                self.token_path
-            )
+        self.starts_path = (
+            packed
+            / f"{split}_window_starts.npy"
+        )
 
-        if not self.timestamp_path.is_file():
-            raise FileNotFoundError(
-                self.timestamp_path
-            )
+        for p in (
+            self.token_path,
+            self.timestamp_path,
+            self.starts_path,
+        ):
+            if not p.is_file():
+                raise FileNotFoundError(p)
 
-        # Read only metadata here.
         tokens = np.load(
             self.token_path,
             mmap_mode="r",
         )
+
         timestamps = np.load(
             self.timestamp_path,
             mmap_mode="r",
         )
 
-        expected_tail = (
-            self.n_tokens,
-            self.embed_dim,
+        starts = np.load(
+            self.starts_path,
+            mmap_mode="r",
         )
 
         if tokens.ndim != 3:
             raise ValueError(
-                f"tokens must be [T,N,D], "
-                f"got {tokens.shape}"
+                tokens.shape
             )
 
-        if tuple(tokens.shape[1:]) != expected_tail:
+        if tuple(
+            tokens.shape[1:]
+        ) != (
+            self.n_tokens,
+            self.embed_dim,
+        ):
             raise ValueError(
-                f"expected token shape (*,"
-                f"{self.n_tokens},"
-                f"{self.embed_dim}), "
-                f"got {tokens.shape}"
+                tokens.shape
             )
 
         if timestamps.ndim != 1:
             raise ValueError(
-                "timestamps must be 1-D"
+                timestamps.shape
             )
 
-        if len(tokens) != len(timestamps):
+        if len(tokens) != len(
+            timestamps
+        ):
             raise ValueError(
-                "token/timestamp count mismatch"
+                "token/timestamp mismatch"
             )
 
-        if len(tokens) < 8:
+        if starts.ndim != 1:
             raise ValueError(
-                "need at least 8 frames"
+                starts.shape
             )
 
-        gaps = np.diff(
-            np.asarray(
-                timestamps,
-                dtype=np.int64,
+        if len(starts) == 0:
+            raise ValueError(
+                "no valid windows"
             )
+
+        if (
+            int(starts.min()) < 0
+            or int(starts.max()) + 7
+            >= len(tokens)
+        ):
+            raise ValueError(
+                "invalid window starts"
+            )
+
+        self.num_frames = int(
+            len(tokens)
         )
 
-        if not np.all(gaps > 0):
-            raise ValueError(
-                "timestamps must be strictly increasing"
-            )
-
-        self.num_frames = int(len(tokens))
-        self.num_samples = (
-            self.num_frames - 7
+        self.num_samples = int(
+            len(starts)
         )
 
-        # Important:
-        # don't keep mmap objects created in parent process.
-        # Every DataLoader worker lazily opens its own mmap.
+        # Do not retain mmap opened in parent process.
         self._tokens = None
         self._timestamps = None
+        self._starts = None
 
-    def _ensure_open(self) -> None:
+    def __getstate__(self):
+        state = (
+            self.__dict__.copy()
+        )
+
+        state["_tokens"] = None
+        state["_timestamps"] = None
+        state["_starts"] = None
+
+        return state
+
+    def _ensure_open(self):
         if self._tokens is None:
             self._tokens = np.load(
                 self.token_path,
@@ -141,22 +180,19 @@ class PackedStage2Dataset(Dataset):
                 mmap_mode="r",
             )
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
+        if self._starts is None:
+            self._starts = np.load(
+                self.starts_path,
+                mmap_mode="r",
+            )
 
-        # Re-open mmap independently inside workers.
-        state["_tokens"] = None
-        state["_timestamps"] = None
-
-        return state
-
-    def __len__(self) -> int:
+    def __len__(self):
         return self.num_samples
 
     def __getitem__(
         self,
         index: int,
-    ) -> dict[str, torch.Tensor]:
+    ):
         if index < 0:
             index += len(self)
 
@@ -167,20 +203,35 @@ class PackedStage2Dataset(Dataset):
 
         self._ensure_open()
 
-        start = index
-        stop = index + 8
+        start = int(
+            self._starts[index]
+        )
 
-        # copy() deliberately detaches from read-only mmap
-        # and gives torch a writable contiguous array.
+        stop = start + 8
+
+        # One contiguous disk/mmap access instead of
+        # seven independent torch.load calls.
         window_np = np.asarray(
-            self._tokens[start:stop],
+            self._tokens[
+                start:stop
+            ],
             dtype=np.float32,
         ).copy()
 
         ts_np = np.asarray(
-            self._timestamps[start:stop],
+            self._timestamps[
+                start:stop
+            ],
             dtype=np.int64,
         ).copy()
+
+        if not np.all(
+            np.diff(ts_np) > 0
+        ):
+            raise RuntimeError(
+                f"non-increasing timestamps "
+                f"at sample {index}"
+            )
 
         window = torch.from_numpy(
             window_np
@@ -190,23 +241,19 @@ class PackedStage2Dataset(Dataset):
             ts_np
         )
 
-        if tuple(window.shape) != (
+        if tuple(
+            window.shape
+        ) != (
             8,
             self.n_tokens,
             self.embed_dim,
         ):
             raise RuntimeError(
-                f"unexpected window shape "
-                f"{tuple(window.shape)}"
+                window.shape
             )
 
-        # Anchor t is the fourth visible context frame.
         context = window[:4]
 
-        # Relative to window:
-        # index 4 = t+1
-        # index 5 = t+2
-        # index 7 = t+4
         target = window[
             torch.tensor(
                 [4, 5, 7],
@@ -214,7 +261,9 @@ class PackedStage2Dataset(Dataset):
             )
         ]
 
-        context_ts = timestamps[:4]
+        context_ts = (
+            timestamps[:4]
+        )
 
         target_ts = timestamps[
             torch.tensor(
@@ -226,14 +275,21 @@ class PackedStage2Dataset(Dataset):
         delta_t = (
             target_ts
             - context_ts[-1]
-        ).to(torch.float32) * 1e-6
+        ).to(
+            torch.float32
+        ) * 1e-6
 
         return {
-            "window": window,
-            "timestamps": timestamps,
-            "context": context,
-            "target": target,
-            "delta_t": delta_t,
+            "window":
+                window,
+            "timestamps":
+                timestamps,
+            "context":
+                context,
+            "target":
+                target,
+            "delta_t":
+                delta_t,
             "context_timestamps":
                 context_ts,
             "target_timestamps":
