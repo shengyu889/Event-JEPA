@@ -1,0 +1,147 @@
+{
+  "model": "gep",
+  "fusion_checkpoint": "/mnt/data2/gsy/Event-JEPA/runs/searaft_v8_2_rawbase_gep_full_seed0/last.pt",
+  "raw_checkpoint": "/mnt/data2/gsy/Event-JEPA/pretrained/searaft_M/model.safetensors",
+  "strict_pretrain": {
+    "loaded_state_tensors": 472,
+    "fnet_tensors": 215,
+    "cnet_tensors": 215,
+    "missing": [],
+    "unexpected": [],
+    "sha256": "cb8cfbf14c5e0f6734b64add383708b7ff68cc6089a0007c67165d4761346102",
+    "path": "/mnt/data2/gsy/Event-JEPA/pretrained/searaft_M/model.safetensors",
+    "restored_shared_aliases": [
+      "cnet.layer2.0.downsample.1.weight",
+      "cnet.layer2.0.downsample.1.bias",
+      "cnet.layer2.0.downsample.1.running_mean",
+      "cnet.layer2.0.downsample.1.running_var",
+      "cnet.layer2.0.downsample.1.num_batches_tracked",
+      "cnet.layer3.0.downsample.1.weight",
+      "cnet.layer3.0.downsample.1.bias",
+      "cnet.layer3.0.downsample.1.running_mean",
+      "cnet.layer3.0.downsample.1.running_var",
+      "cnet.layer3.0.downsample.1.num_batches_tracked",
+      "fnet.layer2.0.downsample.1.weight",
+      "fnet.layer2.0.downsample.1.bias",
+      "fnet.layer2.0.downsample.1.running_mean",
+      "fnet.layer2.0.downsample.1.running_var",
+      "fnet.layer2.0.downsample.1.num_batches_tracked",
+      "fnet.layer3.0.downsample.1.weight",
+      "fnet.layer3.0.downsample.1.bias",
+      "fnet.layer3.0.downsample.1.running_mean",
+      "fnet.layer3.0.downsample.1.running_var",
+      "fnet.layer3.0.downsample.1.num_batches_tracked"
+    ]
+  },
+  "base_exact": {
+    "expected_tensors": 472,
+    "checkpoint_tensors": 472,
+    "missing": [],
+    "extra": [],
+    "changed": [],
+    "changed_count": 0,
+    "exact_match": true
+  },
+  "stage1_exact": {
+    "expected_tensors": 175,
+    "checkpoint_tensors": 175,
+    "missing": [],
+    "extra": [],
+    "changed": [],
+    "changed_count": 0,
+    "exact_match": true
+  },
+  "stage2_exact": null,
+  "trained_gate_values": {
+    "fnet": 0.16919060051441193,
+    "cnet": 0.1299109160900116
+  },
+  "same_sample_parity_tolerance": 1e-05,
+  "results": {
+    "indoor_flying1": {
+      "samples": 8,
+      "metrics": {
+        "raw": {
+          "EPE": 0.7786782531972851,
+          "pred_mag": 1.948070636620254,
+          "cosine": 0.8936679644075198,
+          "event_valid_pixels": 32525
+        },
+        "zero_gate": {
+          "EPE": 0.7786782531972851,
+          "pred_mag": 1.948070636620254,
+          "cosine": 0.8936679644075198,
+          "event_valid_pixels": 32525
+        },
+        "fusion": {
+          "EPE": 0.953996241083519,
+          "pred_mag": 1.2500140860330866,
+          "cosine": 0.4402705016389714,
+          "event_valid_pixels": 32525
+        }
+      },
+      "max_abs_zero_vs_raw": 0.0,
+      "mean_abs_zero_vs_raw_eventpixels": 0.0,
+      "max_abs_fusion_vs_raw": 6.872431755065918,
+      "mean_abs_fusion_vs_raw_eventpixels": 0.8329059764296161,
+      "delta_EPE_fusion_minus_raw": 0.17531798788623387
+    },
+    "indoor_flying2": {
+      "samples": 8,
+      "metrics": {
+        "raw": {
+          "EPE": 1.5842117630355321,
+          "pred_mag": 3.117145720754375,
+          "cosine": 0.8775781806520171,
+          "event_valid_pixels": 45153
+        },
+        "zero_gate": {
+          "EPE": 1.5842117630355321,
+          "pred_mag": 3.117145720754375,
+          "cosine": 0.8775781806520171,
+          "event_valid_pixels": 45153
+        },
+        "fusion": {
+          "EPE": 2.172149052243031,
+          "pred_mag": 1.440418299976051,
+          "cosine": 0.6778276385512717,
+          "event_valid_pixels": 45153
+        }
+      },
+      "max_abs_zero_vs_raw": 0.0,
+      "mean_abs_zero_vs_raw_eventpixels": 0.0,
+      "max_abs_fusion_vs_raw": 12.577459335327148,
+      "mean_abs_fusion_vs_raw_eventpixels": 1.6636805386753744,
+      "delta_EPE_fusion_minus_raw": 0.5879372892074988
+    },
+    "indoor_flying3": {
+      "samples": 8,
+      "metrics": {
+        "raw": {
+          "EPE": 0.7038965934973632,
+          "pred_mag": 1.7141958905617933,
+          "cosine": 0.8674702379871053,
+          "event_valid_pixels": 26954
+        },
+        "zero_gate": {
+          "EPE": 0.7038965934973632,
+          "pred_mag": 1.7141958905617933,
+          "cosine": 0.8674702379871053,
+          "event_valid_pixels": 26954
+        },
+        "fusion": {
+          "EPE": 0.966253874695884,
+          "pred_mag": 0.573648176803149,
+          "cosine": 0.5882525852940432,
+          "event_valid_pixels": 26954
+        }
+      },
+      "max_abs_zero_vs_raw": 0.0,
+      "mean_abs_zero_vs_raw_eventpixels": 0.0,
+      "max_abs_fusion_vs_raw": 11.854762077331543,
+      "mean_abs_fusion_vs_raw_eventpixels": 0.8597529762583953,
+      "delta_EPE_fusion_minus_raw": 0.26235728119852075
+    }
+  },
+  "interpretation": "audit only, no training; MVSEC v6 candidate protocol"
+}

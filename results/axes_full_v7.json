@@ -1,0 +1,124 @@
+{
+  "note": "Debug-only oracle over 8 transforms; not model comparison",
+  "model": "full",
+  "n_sampled_frames": 24,
+  "results": {
+    "indoor_flying1": {
+      "zero_epe": 1.5170504871515451,
+      "pixels": 112733,
+      "transforms": {
+        "identity": {
+          "epe": 1.4114261372229122,
+          "cos_on_gt_mag_gt1": 0.21858208246414168
+        },
+        "negate_both": {
+          "epe": 1.7186003950691553,
+          "cos_on_gt_mag_gt1": -0.21858208246414168
+        },
+        "negate_x": {
+          "epe": 1.524389680384544,
+          "cos_on_gt_mag_gt1": 0.09379246407728932
+        },
+        "negate_y": {
+          "epe": 1.641795091427359,
+          "cos_on_gt_mag_gt1": -0.09379246407728932
+        },
+        "swap_xy": {
+          "epe": 1.6054946246865538,
+          "cos_on_gt_mag_gt1": -0.060535357741834134
+        },
+        "swap_negate_both": {
+          "epe": 1.5338755614576847,
+          "cos_on_gt_mag_gt1": 0.060535357741834134
+        },
+        "rotate_cw": {
+          "epe": 1.6279899174952084,
+          "cos_on_gt_mag_gt1": -0.04990480956252038
+        },
+        "rotate_ccw": {
+          "epe": 1.5495350389708118,
+          "cos_on_gt_mag_gt1": 0.04990480956252038
+        }
+      },
+      "best_transform": "identity"
+    },
+    "indoor_flying2": {
+      "zero_epe": 2.461437621355964,
+      "pixels": 136206,
+      "transforms": {
+        "identity": {
+          "epe": 2.393982144047793,
+          "cos_on_gt_mag_gt1": 0.11654545227634122
+        },
+        "negate_both": {
+          "epe": 2.6134542168271757,
+          "cos_on_gt_mag_gt1": -0.11654545227634122
+        },
+        "negate_x": {
+          "epe": 2.501193344269521,
+          "cos_on_gt_mag_gt1": -0.0021308216461184593
+        },
+        "negate_y": {
+          "epe": 2.55509894441106,
+          "cos_on_gt_mag_gt1": 0.0021308216461184593
+        },
+        "swap_xy": {
+          "epe": 2.4625368697114296,
+          "cos_on_gt_mag_gt1": 0.04748111314801108
+        },
+        "swap_negate_both": {
+          "epe": 2.561441037548453,
+          "cos_on_gt_mag_gt1": -0.04748111314801108
+        },
+        "rotate_cw": {
+          "epe": 2.5334584932016524,
+          "cos_on_gt_mag_gt1": 0.006164293198193845
+        },
+        "rotate_ccw": {
+          "epe": 2.537497812793917,
+          "cos_on_gt_mag_gt1": -0.006164293198193845
+        }
+      },
+      "best_transform": "identity"
+    },
+    "indoor_flying3": {
+      "zero_epe": 2.572415283757396,
+      "pixels": 154864,
+      "transforms": {
+        "identity": {
+          "epe": 2.6263845359662987,
+          "cos_on_gt_mag_gt1": -0.021978366023483308
+        },
+        "negate_both": {
+          "epe": 2.606165957324677,
+          "cos_on_gt_mag_gt1": 0.021978366023483308
+        },
+        "negate_x": {
+          "epe": 2.717959024675418,
+          "cos_on_gt_mag_gt1": -0.11501581124641613
+        },
+        "negate_y": {
+          "epe": 2.5587617165397516,
+          "cos_on_gt_mag_gt1": 0.11501581124641613
+        },
+        "swap_xy": {
+          "epe": 2.657776921643156,
+          "cos_on_gt_mag_gt1": -0.04091938041230484
+        },
+        "swap_negate_both": {
+          "epe": 2.5946510104986826,
+          "cos_on_gt_mag_gt1": 0.04091938041230484
+        },
+        "rotate_cw": {
+          "epe": 2.6538344966316374,
+          "cos_on_gt_mag_gt1": -0.0065835803695125745
+        },
+        "rotate_ccw": {
+          "epe": 2.644021913749639,
+          "cos_on_gt_mag_gt1": 0.0065835803695125745
+        }
+      },
+      "best_transform": "negate_y"
+    }
+  }
+}

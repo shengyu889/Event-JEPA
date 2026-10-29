@@ -1,0 +1,38 @@
+{
+  "protocol": "mvsec_image_timestamp_v6_candidate_not_official_replication",
+  "mode": "zero-only",
+  "samples_per_sequence": 0,
+  "comment": "Subsampled model and baseline are ALWAYS evaluated on identical frames & masks; samples=0 is full split.",
+  "results": {
+    "indoor_flying1": {
+      "frames": 2190,
+      "native_pixels": 197012400,
+      "gt_valid_fraction": 0.7602576487571341,
+      "event_active_fraction": 0.06819409336671195,
+      "joint_eval_fraction": 0.05350881467359415,
+      "joint_eval_pixels": 10541900,
+      "zero_epe": 1.577449163388606,
+      "zero_outlier_pct": 7.126590083381553
+    },
+    "indoor_flying2": {
+      "frames": 2649,
+      "native_pixels": 238304040,
+      "gt_valid_fraction": 0.7989005851516408,
+      "event_active_fraction": 0.09913840738914875,
+      "joint_eval_fraction": 0.07929964175177223,
+      "joint_eval_pixels": 18897425,
+      "zero_epe": 2.7301135821628644,
+      "zero_outlier_pct": 34.02732912023728
+    },
+    "indoor_flying3": {
+      "frames": 2936,
+      "native_pixels": 264122560,
+      "gt_valid_fraction": 0.7311847083414609,
+      "event_active_fraction": 0.08602194375217323,
+      "joint_eval_fraction": 0.0642655970016344,
+      "joint_eval_pixels": 16973994,
+      "zero_epe": 2.3065682634382876,
+      "zero_outlier_pct": 23.87320862726828
+    }
+  }
+}

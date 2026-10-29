@@ -1,0 +1,357 @@
+{
+  "candidate_labels": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt",
+  "raw_dataset": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC",
+  "paper_counts": {
+    "train": 26677,
+    "test_total": 7775
+  },
+  "sequences": {
+    "outdoor_day2": {
+      "gt": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt/outdoor_day2_gt_flow_dist.npz",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 17555972270,
+        "members": [
+          "timestamps.npy",
+          "x_flow_dist.npy",
+          "y_flow_dist.npy"
+        ],
+        "arrays": {
+          "timestamps": {
+            "shape": [
+              12197
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "x_flow_dist": {
+            "shape": [
+              12197,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "y_flow_dist": {
+            "shape": [
+              12197,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          }
+        },
+        "n_timestamps": 12197,
+        "n_flow_arrays": 12197,
+        "n_available_pairs": 12196,
+        "n_observed_tc4_compatible": 12193,
+        "timestamp_start": 1506119819.8275943,
+        "timestamp_end": 1506120429.8027291,
+        "dt_ms": {
+          "min": 48.773527,
+          "median": 50.013304,
+          "p05": 49.901724,
+          "p95": 50.126553,
+          "max": 51.279306
+        },
+        "flow_interval_semantics": "NOT PROVEN by NPZ headers alone"
+      },
+      "raw": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/raw/outdoor_day/outdoor_day2_data.hdf5",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 41506282485,
+        "events": [
+          466410069,
+          4
+        ],
+        "image_timestamps": 28583,
+        "event_first_s": 1506119776.3833518,
+        "event_last_s": 1506120429.7728229,
+        "image_first_s": 1506119776.372423,
+        "image_last_s": 1506120429.7387958,
+        "gt_within_event_range": true
+      },
+      "timeline_comparison": {
+        "candidate_count": 12197,
+        "reference_count": 12197,
+        "candidate_dt_ms": 50.01330375671387,
+        "reference_dt_ms": 50.01330375671387,
+        "match_1us_fraction": 1.0,
+        "match_1ms_fraction": 1.0,
+        "nearest_difference_ms_p95": 0.0
+      }
+    },
+    "indoor_flying1": {
+      "gt": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt/indoor_flying1_gt_flow_dist.npz",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 2013676442,
+        "members": [
+          "timestamps.npy",
+          "x_flow_dist.npy",
+          "y_flow_dist.npy"
+        ],
+        "arrays": {
+          "timestamps": {
+            "shape": [
+              1399
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "x_flow_dist": {
+            "shape": [
+              1399,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "y_flow_dist": {
+            "shape": [
+              1399,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          }
+        },
+        "n_timestamps": 1399,
+        "n_flow_arrays": 1399,
+        "n_available_pairs": 1398,
+        "n_observed_tc4_compatible": 1395,
+        "timestamp_start": 1504645177.711321,
+        "timestamp_end": 1504645247.6212292,
+        "dt_ms": {
+          "min": 49.481869,
+          "median": 50.000787,
+          "p05": 49.921989,
+          "p95": 50.101149,
+          "max": 50.657511
+        },
+        "flow_interval_semantics": "NOT PROVEN by NPZ headers alone"
+      },
+      "raw": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/raw/outdoor_day/indoor_flying1_data.hdf5",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 1700819167,
+        "events": [
+          14071304,
+          4
+        ],
+        "image_timestamps": 2206,
+        "event_first_s": 1504645177.4254043,
+        "event_last_s": 1504645247.7151432,
+        "image_first_s": 1504645177.4490874,
+        "image_last_s": 1504645247.6989872,
+        "gt_within_event_range": true
+      },
+      "timeline_comparison": {
+        "candidate_count": 1399,
+        "reference_count": 1399,
+        "candidate_dt_ms": 50.000786781311035,
+        "reference_dt_ms": 50.000786781311035,
+        "match_1us_fraction": 1.0,
+        "match_1ms_fraction": 1.0,
+        "nearest_difference_ms_p95": 0.0
+      }
+    },
+    "indoor_flying2": {
+      "gt": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt/indoor_flying2_gt_flow_dist.npz",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 2433971974,
+        "members": [
+          "timestamps.npy",
+          "x_flow_dist.npy",
+          "y_flow_dist.npy"
+        ],
+        "arrays": {
+          "timestamps": {
+            "shape": [
+              1691
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "x_flow_dist": {
+            "shape": [
+              1691,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "y_flow_dist": {
+            "shape": [
+              1691,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          }
+        },
+        "n_timestamps": 1691,
+        "n_flow_arrays": 1691,
+        "n_available_pairs": 1690,
+        "n_observed_tc4_compatible": 1687,
+        "timestamp_start": 1504645268.012208,
+        "timestamp_end": 1504645352.5188336,
+        "dt_ms": {
+          "min": 47.619581,
+          "median": 49.996734,
+          "p05": 49.917936,
+          "p95": 50.094736,
+          "max": 52.339077
+        },
+        "flow_interval_semantics": "NOT PROVEN by NPZ headers alone"
+      },
+      "raw": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/raw/outdoor_day/indoor_flying2_data.hdf5",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 2532552285,
+        "events": [
+          25043556,
+          4
+        ],
+        "image_timestamps": 2665,
+        "event_first_s": 1504645267.7161982,
+        "event_last_s": 1504645352.6551223,
+        "image_first_s": 1504645267.7385283,
+        "image_last_s": 1504645352.6118762,
+        "gt_within_event_range": true
+      },
+      "timeline_comparison": {
+        "candidate_count": 1691,
+        "reference_count": 1691,
+        "candidate_dt_ms": 49.99673366546631,
+        "reference_dt_ms": 49.99673366546631,
+        "match_1us_fraction": 1.0,
+        "match_1ms_fraction": 1.0,
+        "nearest_difference_ms_p95": 0.0
+      }
+    },
+    "indoor_flying3": {
+      "gt": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt/indoor_flying3_gt_flow_dist.npz",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 2697376318,
+        "members": [
+          "timestamps.npy",
+          "x_flow_dist.npy",
+          "y_flow_dist.npy"
+        ],
+        "arrays": {
+          "timestamps": {
+            "shape": [
+              1874
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "x_flow_dist": {
+            "shape": [
+              1874,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          },
+          "y_flow_dist": {
+            "shape": [
+              1874,
+              260,
+              346
+            ],
+            "dtype": "float64",
+            "fortran": false,
+            "version": "1.0"
+          }
+        },
+        "n_timestamps": 1874,
+        "n_flow_arrays": 1874,
+        "n_available_pairs": 1873,
+        "n_observed_tc4_compatible": 1870,
+        "timestamp_start": 1504645443.3568141,
+        "timestamp_end": 1504645537.0160363,
+        "dt_ms": {
+          "min": 49.528837,
+          "median": 49.997091,
+          "p05": 49.924612,
+          "p95": 50.098896,
+          "max": 50.437212
+        },
+        "flow_interval_semantics": "NOT PROVEN by NPZ headers alone"
+      },
+      "raw": {
+        "path": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/raw/outdoor_day/indoor_flying3_data.hdf5",
+        "exists": true,
+        "ok": true,
+        "file_bytes": 2625560959,
+        "events": [
+          24004247,
+          4
+        ],
+        "image_timestamps": 2952,
+        "event_first_s": 1504645443.0855954,
+        "event_last_s": 1504645537.1153133,
+        "image_first_s": 1504645443.0924733,
+        "image_last_s": 1504645537.1094594,
+        "gt_within_event_range": true
+      },
+      "timeline_comparison": {
+        "candidate_count": 1874,
+        "reference_count": 1874,
+        "candidate_dt_ms": 49.99709129333496,
+        "reference_dt_ms": 49.99709129333496,
+        "match_1us_fraction": 1.0,
+        "match_1ms_fraction": 1.0,
+        "nearest_difference_ms_p95": 0.0
+      }
+    }
+  },
+  "warnings": [
+    "Candidate label counts differ from ScaleEvent reported sample numbers under both raw-pair and Tc4-compatible conventions.",
+    "Do not claim strict ScaleEvent replication from count matching alone; the released SEA-RAFT code lacks its MVSEC-specific flow trainer."
+  ],
+  "errors": [],
+  "strict_scaleevent_match": false,
+  "observed_counts": {
+    "n_available_pairs": {
+      "train": 12196,
+      "test_total": 4961
+    },
+    "n_observed_tc4_compatible": {
+      "train": 12193,
+      "test_total": 4952
+    }
+  },
+  "count_matching_conventions": [],
+  "published_counts_match": false,
+  "timeline_reference": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC/flow_gt"
+}

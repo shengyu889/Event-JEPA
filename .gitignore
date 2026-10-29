@@ -32,3 +32,4 @@ src/vis_*.png
 
 # Local source backups
 *.bak*
+/third_party/ScaleEvent/

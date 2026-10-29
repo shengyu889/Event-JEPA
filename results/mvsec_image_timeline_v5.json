@@ -1,0 +1,165 @@
+{
+  "protocol": "timeline-evidence-only",
+  "root": "/mnt/data2/gsy/Event-JEPA/datasets/MVSEC",
+  "paper_reported_counts": {
+    "train": 26677,
+    "test_total": 7775
+  },
+  "sequences": {
+    "outdoor_day2": {
+      "images": 28583,
+      "image_consecutive_pairs": 28582,
+      "image_dt": {
+        "min_ms": 22.8579044342041,
+        "median_ms": 22.85909652709961,
+        "p05_ms": 22.858858108520508,
+        "p95_ms": 22.860050201416016,
+        "max_ms": 22.861003875732422
+      },
+      "image_first_s": 1506119776.372423,
+      "image_last_s": 1506120429.7387958,
+      "gt_timestamps": 12197,
+      "gt_nominal_pairs": 12196,
+      "gt_dt": {
+        "min_ms": 48.77352714538574,
+        "median_ms": 50.01330375671387,
+        "p05_ms": 49.901723861694336,
+        "p95_ms": 50.12655258178711,
+        "max_ms": 51.279306411743164
+      },
+      "gt_first_s": 1506119819.8275943,
+      "gt_last_s": 1506120429.8027291,
+      "candidate_image_pairs_within_gt_range": 26681,
+      "candidate_image_pairs_with_approx_cutoff": 26613,
+      "candidate_image_pairs_with_both": 26613,
+      "approx_cutoff_seconds_relative_to_FIRST_IMAGE": 45.0,
+      "WARNING": "Candidate image intervals are NOT valid GT automatically. Optical flow must be integrated/composed between exact image timestamps; the EV-FlowNet upstream cutoff refers to BAG start, not necessarily first image.",
+      "hdf5_path": "datasets/MVSEC/raw/outdoor_day/outdoor_day2_data.hdf5",
+      "raw_events": 466410069
+    },
+    "indoor_flying1": {
+      "images": 2206,
+      "image_consecutive_pairs": 2205,
+      "image_dt": {
+        "min_ms": 31.85892105102539,
+        "median_ms": 31.859159469604492,
+        "p05_ms": 31.85892105102539,
+        "p95_ms": 31.8601131439209,
+        "max_ms": 31.8601131439209
+      },
+      "image_first_s": 1504645177.4490874,
+      "image_last_s": 1504645247.6989872,
+      "gt_timestamps": 1399,
+      "gt_nominal_pairs": 1398,
+      "gt_dt": {
+        "min_ms": 49.481868743896484,
+        "median_ms": 50.000786781311035,
+        "p05_ms": 49.92198944091797,
+        "p95_ms": 50.10114908218384,
+        "max_ms": 50.65751075744629
+      },
+      "gt_first_s": 1504645177.711321,
+      "gt_last_s": 1504645247.6212292,
+      "candidate_image_pairs_within_gt_range": 2193,
+      "candidate_image_pairs_with_approx_cutoff": 2079,
+      "candidate_image_pairs_with_both": 2076,
+      "approx_cutoff_seconds_relative_to_FIRST_IMAGE": 4.0,
+      "WARNING": "Candidate image intervals are NOT valid GT automatically. Optical flow must be integrated/composed between exact image timestamps; the EV-FlowNet upstream cutoff refers to BAG start, not necessarily first image.",
+      "hdf5_path": "datasets/MVSEC/raw/outdoor_day/indoor_flying1_data.hdf5",
+      "raw_events": 14071304
+    },
+    "indoor_flying2": {
+      "images": 2665,
+      "image_consecutive_pairs": 2664,
+      "image_dt": {
+        "min_ms": 31.857967376708984,
+        "median_ms": 31.859159469604492,
+        "p05_ms": 31.85892105102539,
+        "p95_ms": 31.8601131439209,
+        "max_ms": 31.8601131439209
+      },
+      "image_first_s": 1504645267.7385283,
+      "image_last_s": 1504645352.6118762,
+      "gt_timestamps": 1691,
+      "gt_nominal_pairs": 1690,
+      "gt_dt": {
+        "min_ms": 47.61958122253418,
+        "median_ms": 49.99673366546631,
+        "p05_ms": 49.91793632507324,
+        "p95_ms": 50.094735622406006,
+        "max_ms": 52.33907699584961
+      },
+      "gt_first_s": 1504645268.012208,
+      "gt_last_s": 1504645352.5188336,
+      "candidate_image_pairs_within_gt_range": 2652,
+      "candidate_image_pairs_with_approx_cutoff": 2381,
+      "candidate_image_pairs_with_both": 2378,
+      "approx_cutoff_seconds_relative_to_FIRST_IMAGE": 9.0,
+      "WARNING": "Candidate image intervals are NOT valid GT automatically. Optical flow must be integrated/composed between exact image timestamps; the EV-FlowNet upstream cutoff refers to BAG start, not necessarily first image.",
+      "hdf5_path": "datasets/MVSEC/raw/outdoor_day/indoor_flying2_data.hdf5",
+      "raw_events": 25043556
+    },
+    "indoor_flying3": {
+      "images": 2952,
+      "image_consecutive_pairs": 2951,
+      "image_dt": {
+        "min_ms": 31.857967376708984,
+        "median_ms": 31.859159469604492,
+        "p05_ms": 31.85892105102539,
+        "p95_ms": 31.8601131439209,
+        "max_ms": 31.8601131439209
+      },
+      "image_first_s": 1504645443.0924733,
+      "image_last_s": 1504645537.1094594,
+      "gt_timestamps": 1874,
+      "gt_nominal_pairs": 1873,
+      "gt_dt": {
+        "min_ms": 49.52883720397949,
+        "median_ms": 49.99709129333496,
+        "p05_ms": 49.924612045288086,
+        "p95_ms": 50.09889602661133,
+        "max_ms": 50.437211990356445
+      },
+      "gt_first_s": 1504645443.3568141,
+      "gt_last_s": 1504645537.0160363,
+      "candidate_image_pairs_within_gt_range": 2939,
+      "candidate_image_pairs_with_approx_cutoff": 2731,
+      "candidate_image_pairs_with_both": 2728,
+      "approx_cutoff_seconds_relative_to_FIRST_IMAGE": 7.0,
+      "WARNING": "Candidate image intervals are NOT valid GT automatically. Optical flow must be integrated/composed between exact image timestamps; the EV-FlowNet upstream cutoff refers to BAG start, not necessarily first image.",
+      "hdf5_path": "datasets/MVSEC/raw/outdoor_day/indoor_flying3_data.hdf5",
+      "raw_events": 24004247
+    }
+  },
+  "errors": [],
+  "counts_by_definition": {
+    "image_consecutive_pairs": {
+      "outdoor_day2": 28582,
+      "indoor_sum": 7820
+    },
+    "candidate_image_pairs_within_gt_range": {
+      "outdoor_day2": 26681,
+      "indoor_sum": 7784
+    },
+    "candidate_image_pairs_with_approx_cutoff": {
+      "outdoor_day2": 26613,
+      "indoor_sum": 7191
+    },
+    "candidate_image_pairs_with_both": {
+      "outdoor_day2": 26613,
+      "indoor_sum": 7182
+    }
+  },
+  "count_matches_paper_exactly": {
+    "image_consecutive_pairs": false,
+    "candidate_image_pairs_within_gt_range": false,
+    "candidate_image_pairs_with_approx_cutoff": false,
+    "candidate_image_pairs_with_both": false
+  },
+  "warnings": [
+    "A matching image-frame count does not establish ScaleEvent annotation sampling or metric protocol.",
+    "Do not generate GT by repeating 50ms labels or simple time scaling for nonconstant motion.",
+    "EV-FlowNet upstream start_time values are relative to ROS bag start, so approximate HDF5 first-image cutoffs are merely diagnostic.",
+    "ScaleEvent reports initializing downstream decoders with released pretrained weights; verify actual SEA-RAFT initialization before comparing."
+  ]
+}
